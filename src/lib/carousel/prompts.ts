@@ -5,6 +5,19 @@ import {
   getOpenAIClient,
 } from "@/lib/openai/client";
 import { PRODUCTION_RULES } from "./production-rules";
+import {
+  formatVariablesForPrompt,
+  type BrandProfile,
+} from "./variables";
+import type {
+  TemplateBlueprint,
+  TemplateSlideBlueprint,
+} from "./template-blueprint";
+import {
+  buildStudioReferenceUrls,
+  TEMPLATE_LAYOUT_GUIDE_PROMPT,
+  USER_ASSET_PRIMARY_PROMPT,
+} from "./studio-asset-references";
 
 export interface BrandIdentity {
   brand_tone: string | null;
@@ -24,6 +37,10 @@ export interface StorylineBeat {
   role: string;
   /** A short VISUAL brief for the slide background — never written on the image. */
   brief: string;
+  /** Per-slide overlay layout from template blueprint (studio mode). */
+  layout?: string;
+  /** Full slide blueprint metadata when available. */
+  slideBlueprint?: TemplateSlideBlueprint;
 }
 
 /** The full planned storyline: a shared visual world + the per-slide beats. */
@@ -73,6 +90,17 @@ function buildBrandContext(brand: BrandIdentity): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Full brandbook context including Variable Dictionary keys. */
+export function buildFullBrandContext(brand: BrandProfile): string {
+  const dict = formatVariablesForPrompt(brand);
+  return dict || buildBrandContext({
+    brand_tone: brand.brand_tone,
+    target_audience: brand.target_audience,
+    value_propositions: brand.value_propositions,
+    llm_summary: brand.llm_summary,
+  });
 }
 
 // ── Step 1: Generate editable captions (text that goes ON the slides) ────
@@ -460,6 +488,303 @@ export async function generateStoryline(
   return { visualTheme, beats };
 }
 
+// ── Blueprint-driven storyline planning (studio mode) ─────────────────────────
+
+const BLUEPRINT_PLAN_SYSTEM = `You are a creative director. Given a brand, topic, and a TEMPLATE BLUEPRINT (structural analysis of a proven carousel), write a per-slide VISUAL brief for a NEW carousel that replicates the template's format for this brand.
+
+Rules:
+- Keep EXACTLY the same number of slides and the same structural job per slide (narrativePurpose).
+- Match each slide's composition type (single photo vs split vs collage) in your brief.
+- Adapt content to the brand and topic — do NOT copy the template's literal topic.
+- Do NOT write on-image captions — only describe visuals for the background image.
+- Output valid JSON: { "visual_theme": string, "beats": [{ "position": number, "brief": string }] }`;
+
+export async function planSlidesFromBlueprint(
+  blueprint: TemplateBlueprint,
+  brand: BrandProfile,
+  topic: string,
+  platform: string,
+  model?: string,
+): Promise<Storyline> {
+  const brandContext = buildFullBrandContext(brand);
+  const slideSpec = blueprint.slides
+    .map(
+      (s) =>
+        `Slide ${s.position} (${s.role}): purpose="${s.narrativePurpose}", layout=${s.layout}, photos=${s.composition.photoCount}/${s.composition.photoLayout}, text=${s.textZone.style}@${s.textZone.placement}`,
+    )
+    .join("\n");
+
+  const openai = getOpenAIClient();
+  const completion = await openai.chat.completions.create({
+    ...EVOLINK_CHAT_DEFAULTS,
+    model: model || EVOLINK_CHAT_DEFAULTS.model,
+    max_completion_tokens: 2048,
+    temperature: 0.7,
+    messages: [
+      { role: "system", content: `${BLUEPRINT_PLAN_SYSTEM}\n\n${PRODUCTION_RULES}` },
+      {
+        role: "user",
+        content: `Brand:\n${brandContext}\n\nTopic: ${topic || "(use brand value proposition)"}\nPlatform: ${platform}\n\nTemplate arc: ${blueprint.summary}\nArc type: ${blueprint.arcType}\nCopy pattern: ${blueprint.copyPattern}\nGlobal style: ${blueprint.globalVisualStyle}\n\nPer-slide structure:\n${slideSpec}\n\nWrite visual briefs as JSON:`,
+      },
+    ],
+    response_format: { type: "json_object" },
+  });
+
+  const text = extractMessageText(completion);
+  const fallback = topic.trim() || "on-brand lifestyle visual";
+  const visualTheme =
+    blueprint.globalVisualStyle.trim() ||
+    (text ? (JSON.parse(text).visual_theme ?? "") : "");
+
+  let briefs: string[] = [];
+  if (text) {
+    const parsed = JSON.parse(text);
+    const raw: { position?: number; brief?: string }[] = Array.isArray(parsed)
+      ? parsed
+      : parsed.beats ?? parsed.slides ?? [];
+    briefs = raw
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .map((b) => (typeof b.brief === "string" ? b.brief.trim() : ""))
+      .filter(Boolean);
+  }
+
+  const beats: StorylineBeat[] = blueprint.slides.map((slide, i) => ({
+    position: slide.position,
+    role: slide.role,
+    brief: briefs[i] ?? briefs[briefs.length - 1] ?? fallback,
+    layout: slide.layout,
+    slideBlueprint: slide,
+  }));
+
+  return { visualTheme, beats };
+}
+
+// ── Blueprint-aware caption generation (studio mode) ────────────────────────
+
+const BLUEPRINT_CAPTION_SYSTEM = `You are an expert social media carousel copywriter. Write on-image captions for slides that follow a TEMPLATE'S copy pattern but with THIS brand's content.
+
+Rules:
+- Match the template's copyPattern (e.g. question hook → numbered tips → CTA) — same structure, new brand content.
+- Per slide, respect textZone style and lengthHint from the blueprint.
+- When textZone.style is "list", line 1 is the title; each bullet on its own following line (no bullet chars).
+- When textZone.style is "body" and placement is "card", put a short bold title on line 1, a blank line, then the body paragraph (like a Notes app card).
+- Each caption is rendered ON TOP of the slide image as overlay text.
+- Match brand tone. Do NOT copy template literal text.
+- Output valid JSON: { "captions": [{ "position": number, "caption": string }] }`;
+
+export async function generateCaptionsFromBlueprint(
+  brand: BrandProfile,
+  platform: string,
+  slides: GeneratedSlideRef[],
+  topic: string,
+  blueprint: TemplateBlueprint,
+  model?: string,
+  imperfect = false,
+): Promise<SlideCaption[]> {
+  const ordered = [...slides].sort((a, b) => a.position - b.position);
+  if (ordered.length === 0) return [];
+
+  const brandContext = buildFullBrandContext(brand);
+  const base = `${BLUEPRINT_CAPTION_SYSTEM}\n\n${PRODUCTION_RULES}`;
+  const systemPrompt = imperfect
+    ? `${base}\n\n${IMPERFECT_CAPTION_GUIDANCE}`
+    : base;
+
+  const slideHints = blueprint.slides
+    .map(
+      (s) =>
+        `Slide ${s.position}: text style=${s.textZone.style}, placement=${s.textZone.placement}, alignment=${s.textZone.alignment ?? "center"}, length=${s.textZone.lengthHint}, purpose=${s.narrativePurpose}${s.typography ? `, typography=${s.typography.weight}/${s.typography.case}` : ""}${s.colors ? `, overlay=${s.colors.overlayStrength}` : ""}`,
+    )
+    .join("\n");
+
+  const intro = `Brand:\n${brandContext}\n\nTopic: ${topic || "(none)"}\nPlatform: ${platform}\n\nTemplate copy pattern: ${blueprint.copyPattern}\nTemplate arc: ${blueprint.summary}\n\nPer-slide text guidance:\n${slideHints}\n\nWrite captions matching the pattern. Return JSON { "captions": [{ "position", "caption" }] }.`;
+
+  const briefLine = (s: GeneratedSlideRef) =>
+    `Slide ${s.position} (role: ${s.role}). Visual brief: ${s.prompt ?? "(n/a)"}.`;
+
+  const multimodalContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    { type: "text", text: intro },
+  ];
+  for (const s of ordered) {
+    multimodalContent.push({ type: "text", text: briefLine(s) });
+    if (s.imageUrl) {
+      multimodalContent.push({ type: "image_url", image_url: { url: s.imageUrl } });
+    }
+  }
+
+  const textOnlyContent = `${intro}\n\nSlides:\n${ordered.map(briefLine).join("\n")}`;
+
+  const openai = getOpenAIClient();
+
+  const run = async (
+    content: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
+  ): Promise<SlideCaption[]> => {
+    const completion = await openai.chat.completions.create({
+      ...EVOLINK_CHAT_DEFAULTS,
+      model: model || EVOLINK_CHAT_DEFAULTS.model,
+      max_completion_tokens: 2048,
+      temperature: imperfect ? 0.9 : 0.7,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const text = extractMessageText(completion);
+    if (!text) throw new Error("LLM returned empty response for blueprint captions");
+
+    const parsed = JSON.parse(text);
+    const raw: { position?: number; caption?: string }[] = Array.isArray(parsed)
+      ? parsed
+      : parsed.captions ?? parsed.slides ?? [];
+
+    const byPosition = new Map<number, string>();
+    for (const r of raw) {
+      if (typeof r?.position === "number" && typeof r?.caption === "string") {
+        byPosition.set(r.position, r.caption.trim());
+      }
+    }
+
+    return ordered.map((s) => ({
+      position: s.position,
+      role: s.role,
+      caption: byPosition.get(s.position) ?? "",
+    }));
+  };
+
+  try {
+    const result = await run(multimodalContent);
+    if (result.some((r) => r.caption)) return result;
+  } catch (err) {
+    console.warn("[prompts] blueprint multimodal captions failed:", err);
+  }
+
+  return run(textOnlyContent);
+}
+
+// ── Social post caption (IG/TikTok publish text) ───────────────────────────
+
+export function formatHashtagsForPublish(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tags) {
+    const body = String(t)
+      .replace(/^#+/, "")
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+    if (!body) continue;
+    const tag = `#${body}`;
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
+}
+
+/** Normalize list-style slide captions to title + bullet lines for overlay renderers. */
+export function normalizeListSlideCaption(caption: string): string {
+  return caption
+    .split(/\n+/)
+    .map((l) => l.replace(/^[\s•\-–→]+/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+export interface PostCaptionResult {
+  post_caption: string;
+  hashtags: string[];
+}
+
+const POST_CAPTION_SYSTEM = `You are an expert social media copywriter. Write the POST caption (the text below the carousel on Instagram/TikTok), NOT the on-slide overlay text.
+
+Rules:
+- Open with a strong hook (1-2 sentences) that matches the carousel story.
+- Add 2-4 short value lines or a mini-summary of what the carousel teaches.
+- End with a clear CTA (save, follow, comment, link in bio — match brand).
+- Match brand tone exactly. Do NOT use placeholder brackets.
+- Keep total length under platform limit (Instagram ~2200 chars, TikTok ~400 chars for caption body).
+- hashtags: 5-10 relevant tags WITHOUT the # prefix (we add it). Mix niche + broad.
+- Output valid JSON: { "post_caption": string, "hashtags": string[] }`;
+
+export async function generatePostCaption(
+  brand: BrandProfile,
+  platform: string,
+  topic: string,
+  slideCaptions: SlideCaption[],
+  copyPattern?: string,
+  model?: string,
+): Promise<PostCaptionResult> {
+  const brandContext = buildFullBrandContext(brand);
+  const maxLen = platform === "tiktok" ? 400 : 2200;
+  const slidesText = slideCaptions
+    .sort((a, b) => a.position - b.position)
+    .map((s) => `Slide ${s.position} (${s.role}): ${s.caption}`)
+    .join("\n");
+
+  const openai = getOpenAIClient();
+  const completion = await openai.chat.completions.create({
+    ...EVOLINK_CHAT_DEFAULTS,
+    model: model || EVOLINK_CHAT_DEFAULTS.model,
+    max_completion_tokens: 1024,
+    temperature: 0.7,
+    messages: [
+      { role: "system", content: `${POST_CAPTION_SYSTEM}\n\n${PRODUCTION_RULES}` },
+      {
+        role: "user",
+        content: `Brand:\n${brandContext}\n\nTopic: ${topic || "(use brand value prop)"}\nPlatform: ${platform}\nMax caption length: ~${maxLen} chars\n${copyPattern ? `Copy pattern: ${copyPattern}\n` : ""}\nOn-slide captions:\n${slidesText}\n\nWrite post caption JSON:`,
+      },
+    ],
+    response_format: { type: "json_object" },
+  });
+
+  const text = extractMessageText(completion);
+  if (!text) {
+    const fallback = slideCaptions.map((s) => s.caption).filter(Boolean).join(" ");
+    return {
+      post_caption: (topic || fallback).slice(0, maxLen),
+      hashtags: formatHashtagsForPublish([brand.app_category ?? "content"].filter(Boolean)),
+    };
+  }
+
+  const parsed = JSON.parse(text) as {
+    post_caption?: string;
+    caption?: string;
+    hashtags?: string[];
+  };
+  const post_caption = (
+    parsed.post_caption ??
+    parsed.caption ??
+    topic ??
+    ""
+  )
+    .trim()
+    .slice(0, maxLen);
+  const hashtags = formatHashtagsForPublish(
+    Array.isArray(parsed.hashtags) ? parsed.hashtags.map(String) : [],
+  );
+
+  return { post_caption, hashtags };
+}
+
+/** Build a publish caption from slide overlay text when post_caption is missing. */
+export function aggregateSlideCaptionsForPublish(
+  slides: { position: number; caption: string | null }[],
+): string {
+  const lines = slides
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((s) => (s.caption ?? "").trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  if (lines.length === 1) return lines[0]!;
+  const hook = lines[0]!;
+  const body = lines.slice(1, -1).join("\n\n");
+  const cta = lines.length > 1 ? lines[lines.length - 1]! : "";
+  return [hook, body, cta].filter(Boolean).join("\n\n").slice(0, 2200);
+}
+
 // ── Step 2: Build image generation prompt ────────────────────────────────────
 // The model produces a CLEAN, text-free background only. The caption is burned
 // on afterward as a crisp overlay (see lib/carousel/overlay.ts) so the text is
@@ -501,6 +826,7 @@ export function buildImagePrompt(
   frameworkVisual?: string,
   layout?: string,
   sharedVisualTheme?: string,
+  slideAssetUrl?: string,
 ): string {
   const aspect = getSizeForPlatform(platform);
   const tone = brand.brand_tone ?? "professional and modern";
@@ -508,22 +834,19 @@ export function buildImagePrompt(
   const hookAssets = assets.filter((a) => a.type === "hook");
   const demoAssets = assets.filter((a) => a.type === "demo");
 
-  // Asset guidance is aligned with the per-slide reference routing
-  // (selectStudioReferences): the creator/lifestyle (hook) rides the hook + CTA
-  // slides; product/demo shots back the value slides. So the text instruction
-  // and the reference images sent to the model always agree.
   let assetContext = "";
-  if ((role === "hook" || role === "cta") && hookAssets.length > 0) {
+  if (slideAssetUrl) {
+    assetContext = `${USER_ASSET_PRIMARY_PROMPT} `;
+  } else if ((role === "hook" || role === "cta") && hookAssets.length > 0) {
     assetContext = `Feature the subject from the reference photo (the creator or lifestyle scene) prominently and recognizably in the composition. `;
   } else if (role === "value" && demoAssets.length > 0) {
     assetContext = `Incorporate the product/demo visual from the reference into the composition. `;
   }
 
-  // When remixing a template, the FIRST reference image is the matching template
-  // slide. Replicate its look closely (clean, text-free) so the output reads as
-  // part of the same carousel series; we composite our own text afterward.
   const templateContext = useTemplateStyle
-    ? `CLOSELY REPLICATE the FIRST reference image (the template) as the master style guide — match its layout, framing, composition, color grading, lighting and overall aesthetic so this slide looks like it belongs to the SAME carousel series. Adapt only the subject/content to the theme below, and copy NONE of its text. `
+    ? slideAssetUrl
+      ? `${TEMPLATE_LAYOUT_GUIDE_PROMPT} `
+      : `CLOSELY REPLICATE the FIRST reference image (the template) as the master style guide — match its layout, framing, composition, color grading, lighting and overall aesthetic so this slide looks like it belongs to the SAME carousel series. Adapt only the subject/content to the theme below, and copy NONE of its text. `
     : "";
 
   // A shared style sentence repeated on every slide keeps the whole carousel
@@ -577,9 +900,17 @@ export function collectAssetUrls(assets: AssetRef[]): string[] {
  */
 export function selectStudioReferences(opts: {
   templateUrl?: string;
+  slideAssetUrl?: string;
   assets: AssetRef[];
   role: string;
 }): string[] {
+  if (opts.slideAssetUrl) {
+    return buildStudioReferenceUrls({
+      slideAssetUrl: opts.slideAssetUrl,
+      templateUrl: opts.templateUrl,
+    });
+  }
+
   const hooks = opts.assets
     .filter((a) => a.type === "hook")
     .map((a) => a.public_url);

@@ -38,8 +38,8 @@ export function BrandIdentityCard({
       <div>
         <h2 className="text-lg font-bold">Your Brand Identity</h2>
         <p className="text-sm text-[#666] mt-0.5">
-          Generated from your quiz. Your Brand DNA powers every piece of content —
-          open it to view and refine the full profile.
+          Generated from your social scrape, website, or quiz. Your Brand DNA
+          powers every piece of content — open it to view and refine the full profile.
         </p>
       </div>
 
@@ -62,8 +62,8 @@ export function BrandIdentityCard({
           <p className="whitespace-pre-wrap text-sm leading-relaxed">{dna}</p>
         ) : (
           <p className="text-sm italic text-[#999]">
-            Take the quiz or crawl your website to generate your Brand DNA — or
-            click here to write it yourself.
+            Take the quiz, scrape your social, or crawl your website to generate
+            your Brand DNA — or click here to write it yourself.
           </p>
         )}
       </button>

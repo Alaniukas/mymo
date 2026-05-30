@@ -165,6 +165,31 @@ export function brandProfileFromRow(
  * Renders the resolved dictionary as a compact, labeled context block for the
  * injection LLM. Only includes keys that actually have a value.
  */
+/** Default carousel topic from the brand quiz / Brain profile. */
+export function defaultTopicFromBrand(
+  brand: Pick<
+    BrandProfile,
+    "llm_summary" | "key_outcome" | "app_tagline" | "value_propositions" | "core_problem"
+  >,
+): string {
+  const summary = brand.llm_summary?.trim();
+  if (summary) return summary;
+
+  const outcome = brand.key_outcome?.trim();
+  if (outcome) return outcome;
+
+  const tagline = brand.app_tagline?.trim();
+  if (tagline) return tagline;
+
+  const vp = arr(brand.value_propositions)[0]?.trim();
+  if (vp) return vp;
+
+  const problem = brand.core_problem?.trim();
+  if (problem) return problem;
+
+  return "";
+}
+
 export function formatVariablesForPrompt(brand: BrandProfile): string {
   const resolved = resolveVariables(brand);
   const lines = VARIABLE_KEYS.filter((k) => resolved[k]).map(

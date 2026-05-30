@@ -11,6 +11,7 @@ import {
   extractMessageText,
   getOpenAIClient,
 } from "@/lib/openai/client";
+import { parseJsonFromLlm } from "@/lib/openai/parse-json";
 import { getModelSettings } from "@/lib/settings/service";
 import { buildBrandPrompt } from "@/lib/carousel/brand-prompt";
 import type { NicheSlug } from "@/lib/carousel/niches";
@@ -33,6 +34,7 @@ export interface ParsedBrand {
   metric_result?: string;
   cta_text?: string;
   brand_color?: string;
+  logo_url?: string;
   product_terminology?: Record<string, string>;
   brand_dna?: string;
   summary?: string;
@@ -104,6 +106,7 @@ function fullIdentityData(
     metric_result: parsed.metric_result || "",
     cta_text: parsed.cta_text || "",
     brand_color: parsed.brand_color || "",
+    logo_url: parsed.logo_url || "",
     brand_dna: parsed.brand_dna || "",
   };
 }
@@ -138,23 +141,45 @@ export async function parseBrandProfile(
 ): Promise<ParsedBrand> {
   const settings = await getModelSettings(supabase);
   const openai = getOpenAIClient();
-  const completion = await openai.chat.completions.create({
-    ...EVOLINK_CHAT_DEFAULTS,
-    model: settings.text_model,
-    temperature: 0.3,
-    max_completion_tokens: 2048,
-    messages: [
-      { role: "system", content: buildBrandPrompt(niche) },
-      { role: "user", content: sourceText },
-    ],
-    response_format: { type: "json_object" },
-  });
 
-  const content = extractMessageText(completion);
-  if (!content) {
-    throw new Error("Brand analysis returned empty content. Try again.");
+  const requestParse = async (maxTokens: number): Promise<ParsedBrand> => {
+    const completion = await openai.chat.completions.create({
+      ...EVOLINK_CHAT_DEFAULTS,
+      model: settings.text_model,
+      temperature: 0.3,
+      max_completion_tokens: maxTokens,
+      messages: [
+        { role: "system", content: buildBrandPrompt(niche) },
+        { role: "user", content: sourceText },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const content = extractMessageText(completion);
+    if (!content) {
+      throw new Error("Brand analysis returned empty content. Try again.");
+    }
+    return parseJsonFromLlm<ParsedBrand>(content);
+  };
+
+  try {
+    return await requestParse(4096);
+  } catch (err) {
+    const isParseError =
+      err instanceof SyntaxError ||
+      (err instanceof Error && /json|parse/i.test(err.message));
+    if (!isParseError) throw err;
+
+    console.warn("[brand-identity] JSON parse failed, retrying once:", err);
+    try {
+      return await requestParse(4096);
+    } catch (retryErr) {
+      console.error("[brand-identity] JSON parse failed after retry:", retryErr);
+      throw new Error(
+        "Brand analysis returned invalid data. Please try again.",
+      );
+    }
   }
-  return JSON.parse(content) as ParsedBrand;
 }
 
 /**

@@ -106,3 +106,27 @@ export async function reuploadImage(
   const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
   return { ok: true, publicUrl: data.publicUrl, storagePath };
 }
+
+/** Upload in-memory bytes to a public bucket (studio asset-direct slides). */
+export async function uploadBuffer(
+  supabase: ServerSupabaseClient,
+  buffer: Buffer,
+  storagePath: string,
+  contentType: string,
+  bucket = "carousels",
+): Promise<ReuploadResult> {
+  const { error: uploadError } = await supabase.storage
+    .from(bucket)
+    .upload(storagePath, new Blob([new Uint8Array(buffer)], { type: contentType }), {
+      contentType,
+      upsert: true,
+    });
+
+  if (uploadError) {
+    console.warn("[carousel/storage] upload error:", uploadError);
+    return { ok: false, reason: "upload" };
+  }
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+  return { ok: true, publicUrl: data.publicUrl, storagePath };
+}

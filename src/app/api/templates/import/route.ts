@@ -8,9 +8,12 @@ import type { ScrapedCarousel } from "@/lib/social/scraper";
 import { reuploadImage } from "@/lib/carousel/storage";
 import { isNiche, nicheLabel } from "@/lib/carousel/niches";
 import { resolveActiveWorkspaceId } from "@/lib/workspace/active";
+import { persistTemplateBlueprint, slideImageUrlsFromTemplate } from "@/lib/carousel/persist-template-blueprint";
+import { getModelSettings } from "@/lib/settings/service";
 
-// Apify's synchronous run (cold actor start + scrape) can take a while.
-export const maxDuration = 60;
+// Apify's synchronous run (cold actor start + scrape) can take a while;
+// blueprint analysis adds another LLM pass.
+export const maxDuration = 120;
 
 type TemplateSlide = {
   position: number;
@@ -37,21 +40,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { url, niche, scope } = body as {
+    const { url, scope } = body as {
       url?: string;
-      niche?: string;
       scope?: string;
     };
 
     if (!url || typeof url !== "string") {
       return NextResponse.json({ error: "url is required" }, { status: 400 });
-    }
-
-    if (!isNiche(niche)) {
-      return NextResponse.json(
-        { error: "A valid niche is required" },
-        { status: 400 },
-      );
     }
 
     const platform = detectPlatform(url);
@@ -71,6 +66,23 @@ export async function POST(request: NextRequest) {
       );
     }
     const workspace = { id: activeProjectId };
+
+    const { data: workspaceRow, error: workspaceError } = await supabase
+      .from("workspaces")
+      .select("niche")
+      .eq("id", activeProjectId)
+      .single();
+
+    if (workspaceError || !isNiche(workspaceRow?.niche)) {
+      return NextResponse.json(
+        {
+          error:
+            "This project has no type set. Choose ecommerce, branding, app, or viral when creating the project.",
+        },
+        { status: 422 },
+      );
+    }
+    const niche = workspaceRow.niche;
 
     // Global templates (workspace_id null) are visible to everyone and must be
     // written with the service-role client, mirroring /api/admin/settings.
@@ -213,12 +225,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Deep structural analysis — template is saved even if this fails; client can retry.
+    let blueprint: Record<string, unknown> | null = null;
+    let blueprintAnalyzedAt: string | null = null;
+    let blueprintError: string | null = null;
+    try {
+      const settings = await getModelSettings(supabase);
+      const imageUrls = slideImageUrlsFromTemplate(slides);
+      const result = await persistTemplateBlueprint(db, template.id, {
+        imageUrls,
+        fallbackImageUrls: scraped.slides.map((s) => s.imageUrl),
+        caption: caption || null,
+        model: settings.text_model,
+        force: true,
+      });
+      blueprint = result.blueprint as unknown as Record<string, unknown>;
+      blueprintAnalyzedAt = result.analyzedAt;
+    } catch (err) {
+      blueprintError =
+        err instanceof Error ? err.message : "Blueprint analysis failed";
+      console.warn("[templates/import] blueprint analysis failed:", err);
+    }
+
     return NextResponse.json({
       template_id: template.id,
       niche,
       scope: wantsGlobal ? "global" : "workspace",
       platform,
       slides_imported: slides.length,
+      blueprint_analyzed: Boolean(blueprint),
+      blueprint_error: blueprintError,
       // Returned so the client can immediately preview the carousel exactly as
       // it was scraped, without an extra round-trip to refetch the new row.
       template: {
@@ -228,6 +264,7 @@ export async function POST(request: NextRequest) {
         source_url: url,
         source_platform: platform,
         slides,
+        blueprint,
       },
     });
   } catch (error) {

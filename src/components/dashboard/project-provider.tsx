@@ -30,7 +30,7 @@ interface ProjectContextValue {
   /** True while a switch/create/delete is in flight. */
   pending: boolean;
   selectProject: (id: string) => void;
-  createProject: (name: string) => Promise<string | null>;
+  createProject: (name: string, niche: string) => Promise<string | null>;
   deleteProject: (id: string) => Promise<boolean>;
 }
 
@@ -61,10 +61,10 @@ export function ProjectProvider({
     });
   }
 
-  async function createProject(name: string): Promise<string | null> {
+  async function createProject(name: string, niche: string): Promise<string | null> {
     setBusy(true);
     try {
-      const res = await createProjectAction(name);
+      const res = await createProjectAction(name, niche);
       if (!res.ok) return null;
       router.refresh();
       return res.activeProjectId;

@@ -7,9 +7,41 @@ import {
   extractTemplateStoryline,
   generateStoryline,
   getSizeForPlatform,
+  planSlidesFromBlueprint,
   selectStudioReferences,
 } from "@/lib/carousel/prompts";
 import type { BrandIdentity, AssetRef, Storyline } from "@/lib/carousel/prompts";
+import {
+  buildBlueprintImagePrompt,
+  parseTemplateBlueprint,
+  selectBlueprintReferences,
+  type TemplateBlueprint,
+} from "@/lib/carousel/template-blueprint";
+import { resolveStudioSlidePlan, slideUsesUserPhotos, trimBlueprintSlides, trimOrderedList } from "@/lib/carousel/studio-slide-count";
+import {
+  assetUrlsForSlide,
+  orderAssetsByIds,
+} from "@/lib/carousel/studio-asset-references";
+import {
+  resolveAssetSlideMapping,
+  subjectZoneForAssignment,
+  type AssetSlideMapping,
+} from "@/lib/carousel/plan-asset-slide-mapping";
+import { ensureAssetsAnalyzed } from "@/lib/carousel/ensure-assets-analyzed";
+import type { AssetWithAnalysis } from "@/lib/carousel/match-assets-to-slides";
+import {
+  composeSlideFromBlueprint,
+  renderAssetAsSlide,
+} from "@/lib/carousel/compose-asset-slide";
+import { loadDecorAssetBuffers } from "@/lib/carousel/extract-template-decor";
+import { overlaySpecFromBlueprint } from "@/lib/carousel/blueprint-overlay";
+import { fetchMediaBuffer, uploadBuffer } from "@/lib/carousel/storage";
+import {
+  ensureTemplateBlueprint,
+  ensureDecorAssetsEnriched,
+  TemplateBlueprintError,
+} from "@/lib/carousel/persist-template-blueprint";
+import { brandProfileFromRow } from "@/lib/carousel/variables";
 import { submitImageGeneration, EvolinkError } from "@/lib/evolink/client";
 import { buildImagePayload } from "@/lib/evolink/models";
 import { getModelSettings } from "@/lib/settings/service";
@@ -29,7 +61,7 @@ type DB = Awaited<ReturnType<typeof createClient>>;
 // Optional carousel columns added by later migrations (music → 007,
 // framework_id/post_caption/hashtags → 010). Stripped on retry so generation
 // still works against an un-migrated database.
-const OPTIONAL_CAROUSEL_COLS = ["music", "framework_id", "post_caption", "hashtags"];
+const OPTIONAL_CAROUSEL_COLS = ["music", "framework_id", "post_caption", "hashtags", "template_id"];
 
 /** Inserts a carousel, retrying without optional columns if they don't exist. */
 async function insertCarousel(
@@ -74,6 +106,7 @@ async function insertSlides(
     delete copy.layout;
     delete copy.role;
     delete copy.base_image_url;
+    delete copy.text_zone;
     return copy;
   });
   const { error: retryErr } = await supabase
@@ -112,6 +145,7 @@ export async function POST(request: NextRequest) {
       asset_ids: assetIds,
       slide_count: slideCount,
       topic,
+      fill_missing_with_ai,
     } = body as {
       combination_id?: string;
       custom_topic?: string;
@@ -126,6 +160,7 @@ export async function POST(request: NextRequest) {
       asset_ids?: string[];
       slide_count?: number;
       topic?: string;
+      fill_missing_with_ai?: boolean;
     };
 
     // Studio mode: the unified, images-first flow. A required template is
@@ -227,16 +262,19 @@ export async function POST(request: NextRequest) {
     // (RLS allows global + own). Each generated slide references the matching
     // template slide as its primary style guide.
     let templateImageUrls: string[] = [];
+    let templateBlueprint: TemplateBlueprint | null = null;
     if (template_id) {
       const { data: template } = await supabase
         .from("carousel_templates")
-        .select("slides")
+        .select("slides, blueprint, caption")
         .eq("id", template_id)
         .maybeSingle();
 
       if (!template) {
         return NextResponse.json({ error: "Template not found" }, { status: 404 });
       }
+
+      templateBlueprint = parseTemplateBlueprint(template.blueprint);
 
       const templateSlides = (template.slides ?? []) as {
         position?: number;
@@ -247,6 +285,35 @@ export async function POST(request: NextRequest) {
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
         .map((s) => s.image_url)
         .filter((u): u is string => typeof u === "string" && u.length > 0);
+
+      if (!templateBlueprint && templateImageUrls.length > 0) {
+        try {
+          const settings = await getModelSettings(supabase);
+          templateBlueprint = await ensureTemplateBlueprint(supabase, template_id, {
+            slides: template.slides,
+            caption: template.caption,
+            model: settings.text_model,
+          });
+        } catch (err) {
+          console.error("[generate-carousel] blueprint analysis failed:", err);
+          const message =
+            err instanceof TemplateBlueprintError
+              ? err.message
+              : "Template layout could not be analyzed. Re-import or re-upload the template.";
+          return NextResponse.json({ error: message }, { status: 422 });
+        }
+      } else if (templateBlueprint && templateImageUrls.length > 0) {
+        try {
+          templateBlueprint = await ensureDecorAssetsEnriched(
+            supabase,
+            template_id,
+            templateImageUrls,
+            templateBlueprint,
+          );
+        } catch (err) {
+          console.warn("[generate-carousel] decor asset enrichment failed:", err);
+        }
+      }
     }
     const useTemplateStyle = templateImageUrls.length > 0;
 
@@ -289,17 +356,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const count = Math.min(
-        Math.max(
-          Math.round(Number(slideCount)) || templateImageUrls.length || 5,
-          2,
-        ),
-        10,
-      );
+      if (!templateBlueprint) {
+        return NextResponse.json(
+          {
+            error:
+              "Template layout was not analyzed. Open the template and run analysis, or re-import it.",
+          },
+          { status: 422 },
+        );
+      }
 
-      // Unified asset pool: the selected assets are used TOGETHER as visual
-      // source material across slides (never one-asset-per-slide). Empty is OK
-      // — the template + brand still drive the look.
       const poolIds = Array.isArray(assetIds)
         ? assetIds.filter((x): x is string => typeof x === "string")
         : [];
@@ -307,50 +373,126 @@ export async function POST(request: NextRequest) {
       if (poolIds.length > 0) {
         const { data: poolRows } = await supabase
           .from("assets")
-          .select("type, name, public_url")
+          .select("id, type, name, public_url")
           .eq("workspace_id", workspace.id)
           .in("id", poolIds);
-        pooledAssets = (poolRows ?? []).map((a) => ({
+        pooledAssets = orderAssetsByIds(poolIds, poolRows ?? []).map((a) => ({
           type: a.type as "hook" | "demo",
           name: a.name,
           public_url: a.public_url,
         }));
       }
+
+      if (pooledAssets.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Select at least one photo from your library. Carousel backgrounds use your images — the template only sets layout and caption style.",
+          },
+          { status: 400 },
+        );
+      }
+
+      const templateSlideCount =
+        templateBlueprint?.slideCount ?? templateImageUrls.length;
+      const fillWithAi = Boolean(fill_missing_with_ai);
+      const slidePlan = resolveStudioSlidePlan(
+        templateSlideCount,
+        pooledAssets.length,
+        fillWithAi,
+      );
+      const targetCount = slidePlan.totalSlides;
+
+      if (slidePlan.trimBlueprint) {
+        templateImageUrls = trimOrderedList(templateImageUrls, targetCount);
+        if (templateBlueprint) {
+          templateBlueprint = trimBlueprintSlides(templateBlueprint, targetCount);
+        }
+      }
+
+      let assetSlideMapping: AssetSlideMapping | null = null;
+      let assetsWithAnalysis: AssetWithAnalysis[] = [];
+      if (templateBlueprint && pooledAssets.length > 0) {
+        const settingsForAssets = await getModelSettings(supabase);
+        assetsWithAnalysis = await ensureAssetsAnalyzed(
+          supabase,
+          workspace.id,
+          poolIds,
+          settingsForAssets.text_model,
+        );
+        assetSlideMapping = await resolveAssetSlideMapping(
+          templateBlueprint.slides,
+          assetsWithAnalysis,
+          slidePlan,
+          settingsForAssets.text_model,
+        );
+      }
+
+      const count = targetCount;
+      if (count < 1) {
+        return NextResponse.json(
+          { error: "Template has no slides to replicate." },
+          { status: 400 },
+        );
+      }
       const topicText = (custom_topic ?? topic ?? "").trim();
       const studioTitle = (topicText || title || "Carousel").slice(0, 60);
 
       const settings = await getModelSettings(supabase);
-
-      // Reverse-engineer the chosen template's narrative arc first, then plan a
-      // NEW storyline that reuses that proven arc and reads as one continuous
-      // story for this brand/topic (with a shared visual world across slides).
-      const templateStoryline = await extractTemplateStoryline(
-        templateImageUrls,
-        settings.text_model,
-      );
+      const brandProfile = brandProfileFromRow(identity);
 
       let storyline: Storyline;
-      try {
-        storyline = await generateStoryline(
-          brandIdentity,
-          topicText,
-          platform,
-          count,
+
+      if (templateBlueprint) {
+        try {
+          storyline = await planSlidesFromBlueprint(
+            templateBlueprint,
+            brandProfile,
+            topicText,
+            platform,
+            settings.text_model,
+          );
+        } catch (err) {
+          console.error("[generate-carousel] blueprint planning failed:", err);
+          storyline = {
+            visualTheme: templateBlueprint.globalVisualStyle,
+            beats: templateBlueprint.slides.map((slide) => ({
+              position: slide.position,
+              role: slide.role,
+              brief: topicText || slide.narrativePurpose,
+              layout: slide.layout,
+              slideBlueprint: slide,
+            })),
+          };
+        }
+      } else {
+        // Fallback for templates imported before blueprint analysis.
+        const templateStoryline = await extractTemplateStoryline(
+          templateImageUrls,
           settings.text_model,
-          false,
-          templateStoryline,
         );
-      } catch (err) {
-        console.error("[generate-carousel] storyline planning failed:", err);
-        // Fall back to a generic hook → value → cta arc so generation proceeds.
-        storyline = {
-          visualTheme: "",
-          beats: Array.from({ length: count }, (_, i) => ({
-            position: i + 1,
-            role: i === 0 ? "hook" : i === count - 1 ? "cta" : "value",
-            brief: topicText || "on-brand lifestyle visual",
-          })),
-        };
+
+        try {
+          storyline = await generateStoryline(
+            brandIdentity,
+            topicText,
+            platform,
+            count,
+            settings.text_model,
+            false,
+            templateStoryline,
+          );
+        } catch (err) {
+          console.error("[generate-carousel] storyline planning failed:", err);
+          storyline = {
+            visualTheme: "",
+            beats: Array.from({ length: count }, (_, i) => ({
+              position: i + 1,
+              role: i === 0 ? "hook" : i === count - 1 ? "cta" : "value",
+              brief: topicText || "on-brand lifestyle visual",
+            })),
+          };
+        }
       }
 
       const beats = storyline.beats;
@@ -362,6 +504,7 @@ export async function POST(request: NextRequest) {
         platform,
         slide_count: beats.length,
         status: "generating",
+        template_id,
       };
       if (hasMusic) studioInsert.music = musicJson;
 
@@ -375,7 +518,6 @@ export async function POST(request: NextRequest) {
 
       const size = getSizeForPlatform(platform);
       const total = beats.length;
-      const layout = "fullbleed_dark_overlay";
       const slideRows: Record<string, unknown>[] = [];
 
       for (const beat of beats) {
@@ -387,52 +529,185 @@ export async function POST(request: NextRequest) {
               ? "cta"
               : "value");
 
-        // The beat's brief seeds the slide's visual theme only — buildImagePrompt
-        // never writes it on the image. The overlay caption is generated to fit
-        // the finished slide later (null for now). The shared visualTheme keeps
-        // every slide visually consistent from the first slide to the last.
-        const imagePrompt = buildImagePrompt(
-          beat.brief,
-          role,
-          beat.position,
-          total,
-          brandIdentity,
-          platform,
-          pooledAssets,
-          true,
-          undefined,
-          layout,
-          storyline.visualTheme,
+        const slideBlueprint = beat.slideBlueprint;
+        const overlaySpec = overlaySpecFromBlueprint(
+          slideBlueprint,
+          beat.layout ?? "fullbleed_dark_overlay",
         );
+        const layout = overlaySpec.layout;
+        const textZone = slideBlueprint?.textZone ?? {
+          placement: overlaySpec.textPlacement,
+          style: overlaySpec.textStyle,
+          lengthHint: "short" as const,
+        };
 
-        // Per-slide references: the matching template slide leads (drives the
-        // layout/style); brand people (hooks) ride the hook + CTA slides, product
-        // (demos) the value slides — so the creator isn't pasted onto every slide.
-        const slideImageUrls = selectStudioReferences({
-          templateUrl:
-            templateImageUrls[(beat.position - 1) % templateImageUrls.length],
-          assets: pooledAssets,
-          role,
-        });
+        const templateUrl =
+          templateImageUrls[(beat.position - 1) % templateImageUrls.length];
+        const assignment = assetSlideMapping?.get(beat.position);
+        const mappedIds = assignment?.assetIds ?? [];
+        const assetIdToUrl = new Map<string, string>();
+        for (let i = 0; i < poolIds.length; i++) {
+          assetIdToUrl.set(poolIds[i]!, pooledAssets[i]!.public_url);
+        }
+        const slideAssetUrls =
+          mappedIds.length > 0
+            ? mappedIds
+                .map((id) => assetIdToUrl.get(id))
+                .filter((u): u is string => Boolean(u))
+            : assetUrlsForSlide(
+                pooledAssets,
+                beat.position - 1,
+                slideBlueprint?.composition?.photoCount ?? 1,
+                slideBlueprint?.composition?.photoLayout,
+              );
+        const slideAssetUrl = slideAssetUrls[0];
+        const hasUserPhotos = pooledAssets.length > 0;
+        const useCompose =
+          hasUserPhotos &&
+          slideBlueprint &&
+          slideUsesUserPhotos(beat.position, slidePlan);
 
-        const { payload } = buildImagePayload(settings.image_model, imagePrompt, {
-          size,
-          quality: "medium",
-          image_urls: slideImageUrls.length > 0 ? slideImageUrls : undefined,
-        });
-
+        let slideStatus: "completed" | "failed" | "generating" | "pending" =
+          "pending";
+        let imageUrl: string | null = null;
+        let storagePath: string | null = null;
         let evolinkTaskId: string | null = null;
-        let slideStatus = "pending";
-        try {
-          const task = await submitImageGeneration(payload);
-          evolinkTaskId = task.id;
-          slideStatus = "generating";
-        } catch (err) {
-          console.error(
-            `[generate-carousel] studio slide ${beat.position} submission failed:`,
-            err,
-          );
+        let imagePrompt = "";
+
+        // User photos + blueprint layout — compose path for assigned photo slides.
+        if (useCompose) {
+          try {
+            const buffers: Buffer[] = [];
+            for (const url of slideAssetUrls) {
+              const media = await fetchMediaBuffer(url);
+              if (media) buffers.push(media.buffer);
+            }
+
+            if (buffers.length === 0 && slideAssetUrl) {
+              const media = await fetchMediaBuffer(slideAssetUrl);
+              if (media) buffers.push(media.buffer);
+            }
+
+            let png: Buffer | null = null;
+            if (buffers.length > 0) {
+              const decorBuffers = slideBlueprint.decorAssets?.length
+                ? await loadDecorAssetBuffers(slideBlueprint.decorAssets)
+                : [];
+              const primaryAssetId = mappedIds[0];
+              const primaryAnalysis = assetsWithAnalysis.find(
+                (a) => a.id === primaryAssetId,
+              )?.analysis;
+              png = await composeSlideFromBlueprint({
+                assetBuffers: buffers,
+                aspect: size,
+                slideBlueprint,
+                decorBuffers,
+                assetSubjectZone: subjectZoneForAssignment(
+                  assignment,
+                  primaryAnalysis,
+                  slideBlueprint.composition?.subjectZone ?? "center",
+                ),
+              });
+              if (!png && buffers[0]) {
+                png = await renderAssetAsSlide(
+                  buffers[0],
+                  size,
+                  slideBlueprint.composition?.subjectZone ?? "center",
+                );
+              }
+            }
+
+            if (png) {
+              const path = `${workspace.id}/${studioCarousel.id}/${beat.position}.png`;
+              const uploaded = await uploadBuffer(
+                supabase,
+                png,
+                path,
+                "image/png",
+                "carousels",
+              );
+              if (uploaded.ok) {
+                imageUrl = uploaded.publicUrl;
+                storagePath = uploaded.storagePath;
+                slideStatus = "completed";
+                imagePrompt = `[user-photo] layout=${layout}, photos=${slideBlueprint.composition.photoCount}/${slideBlueprint.composition.photoLayout}, text=${textZone.placement}/${textZone.style}`;
+              }
+            }
+          } catch (err) {
+            console.error(
+              `[generate-carousel] user-photo slide ${beat.position} failed:`,
+              err,
+            );
+          }
+        }
+
+        // AI for slides without assigned user photos (gap-fill or no photos).
+        if (slideStatus !== "completed" && (!hasUserPhotos || !useCompose)) {
+          imagePrompt = slideBlueprint
+            ? buildBlueprintImagePrompt({
+                brief: beat.brief,
+                role,
+                position: beat.position,
+                totalSlides: total,
+                platform,
+                brandTone: brandIdentity.brand_tone ?? "professional and modern",
+                slideBlueprint,
+                globalVisualStyle: storyline.visualTheme,
+                slideAssetUrl,
+              })
+            : buildImagePrompt(
+                beat.brief,
+                role,
+                beat.position,
+                total,
+                brandIdentity,
+                platform,
+                pooledAssets,
+                true,
+                undefined,
+                layout,
+                storyline.visualTheme,
+                slideAssetUrl,
+              );
+
+          const slideImageUrls = slideBlueprint
+            ? selectBlueprintReferences({
+                slideAssetUrl,
+                slideAssetUrls,
+                slideBlueprint,
+                assets: pooledAssets,
+              })
+            : selectStudioReferences({
+                templateUrl: undefined,
+                slideAssetUrl,
+                assets: pooledAssets,
+                role,
+              });
+
+          const { payload } = buildImagePayload(settings.image_model, imagePrompt, {
+            size,
+            quality: "medium",
+            image_urls: slideImageUrls.length > 0 ? slideImageUrls : undefined,
+          });
+
           slideStatus = "failed";
+          try {
+            const task = await submitImageGeneration(payload);
+            evolinkTaskId = task.id;
+            slideStatus = "generating";
+          } catch (err) {
+            console.error(
+              `[generate-carousel] studio slide ${beat.position} submission failed:`,
+              err,
+            );
+          }
+        }
+
+        if (slideStatus !== "completed" && useCompose) {
+          slideStatus = "failed";
+          imagePrompt =
+            imagePrompt ||
+            `[user-photo-failed] layout=${layout}, asset=${slideAssetUrl ?? "none"}`;
         }
 
         slideRows.push({
@@ -442,8 +717,12 @@ export async function POST(request: NextRequest) {
           prompt: imagePrompt,
           status: slideStatus,
           evolink_task_id: evolinkTaskId,
+          image_url: imageUrl,
+          storage_path: storagePath,
+          base_image_url: imageUrl,
           layout,
           role,
+          text_zone: textZone,
         });
       }
 
@@ -460,12 +739,19 @@ export async function POST(request: NextRequest) {
       }
 
       const allFailedStudio = slideRows.every((s) => s.status === "failed");
+      const allCompletedStudio = slideRows.every((s) => s.status === "completed");
       if (allFailedStudio) {
         await supabase
           .from("carousels")
           .update({ status: "draft" })
           .eq("id", studioCarousel.id);
       } else {
+        if (allCompletedStudio) {
+          await supabase
+            .from("carousels")
+            .update({ status: "ready" })
+            .eq("id", studioCarousel.id);
+        }
         await logContentEvent(supabase, {
           workspaceId: workspace.id,
           eventType: "generated",
@@ -473,6 +759,11 @@ export async function POST(request: NextRequest) {
           frameworkId: null,
           angle: null,
           platform,
+          metadata: {
+            template_id,
+            slide_count: slideRows.length,
+            fill_with_ai: fillWithAi,
+          },
         });
       }
 
@@ -480,9 +771,14 @@ export async function POST(request: NextRequest) {
         carousel_id: studioCarousel.id,
         media_type: "image",
         mode: "studio",
-        status: allFailedStudio ? "draft" : "generating",
+        status: allFailedStudio
+          ? "draft"
+          : allCompletedStudio
+            ? "ready"
+            : "generating",
         slides_submitted: slideRows.filter((s) => s.status === "generating").length,
         slides_failed: slideRows.filter((s) => s.status === "failed").length,
+        slides_completed: slideRows.filter((s) => s.status === "completed").length,
       });
     }
 

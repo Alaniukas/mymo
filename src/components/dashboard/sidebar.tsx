@@ -4,37 +4,39 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Globe,
-  ImagePlus,
+  Palette,
   Layers,
   LayoutTemplate,
   Link2,
   Plus,
   PanelLeftClose,
   PanelLeftOpen,
+  Users,
+  BookOpen,
+  BarChart3,
+  Flame,
+  Sparkles,
 } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "@/components/logo";
 import { PlanUsageCard } from "@/components/dashboard/plan-usage-card";
 import { SidebarProfile } from "@/components/dashboard/sidebar-profile";
 import { ProjectSwitcher } from "@/components/dashboard/project-switcher";
-import { useActiveProject } from "@/components/dashboard/project-provider";
-import { nicheIdentityLabel } from "@/lib/carousel/niches";
 import { cn } from "@/lib/utils";
 
-// Ordered to mirror the simplified content pipeline: set up the brand, add
-// assets, pick a template style — then the published OUTPUT. Captions and
-// generation now live inside the Create wizard, so there are no separate
-// Generate/Review steps. The identity label is filled in per-niche at render.
 const mainNav = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/onboarding", label: "App Identity", icon: Globe },
-  { href: "/dashboard/assets", label: "Assets", icon: ImagePlus },
+  { href: "/dashboard/onboarding", label: "Brand setup", icon: Palette },
   { href: "/dashboard/templates", label: "Templates", icon: LayoutTemplate },
+  { href: "/dashboard/community-templates", label: "Community", icon: Users },
 ];
 
 const outputNav = [
   { href: "/dashboard/carousels", label: "Carousels", icon: Layers },
+  { href: "/dashboard/stories/new?source=social", label: "Social → story", icon: Sparkles },
+  { href: "/dashboard/viral/new", label: "Meme pump", icon: Flame },
+  { href: "/dashboard/library", label: "Library", icon: BookOpen },
+  { href: "/dashboard/insights", label: "Insights", icon: BarChart3 },
   { href: "/dashboard/connections", label: "Connections", icon: Link2 },
 ];
 
@@ -45,22 +47,17 @@ interface SidebarProps {
 
 export function Sidebar({ userEmail, isAdmin }: SidebarProps) {
   const pathname = usePathname();
-  const { activeProject } = useActiveProject();
   const [collapsed, setCollapsed] = useState(false);
 
-  // The brand-identity step is labelled per-niche ("App Identity", "Brand
-  // Identity", or just "Identity" for viral).
-  const identityLabel = nicheIdentityLabel(activeProject?.niche);
-  const navItems = mainNav.map((item) =>
-    item.href === "/dashboard/onboarding"
-      ? { ...item, label: identityLabel }
-      : item,
-  );
-
   function isActive(href: string) {
-    return href === "/dashboard"
-      ? pathname === "/dashboard"
-      : pathname.startsWith(href);
+    if (href === "/dashboard") return pathname === "/dashboard";
+    if (href === "/dashboard/onboarding") {
+      return (
+        pathname.startsWith("/dashboard/onboarding") ||
+        pathname.startsWith("/dashboard/assets")
+      );
+    }
+    return pathname.startsWith(href);
   }
 
   function renderItem(item: (typeof mainNav)[number]) {
@@ -91,8 +88,6 @@ export function Sidebar({ userEmail, isAdmin }: SidebarProps) {
         collapsed ? "w-[76px]" : "w-[272px]",
       )}
     >
-      {/* Sky + clouds lifted from the landing hero — zoomed to keep the airy
-          upper sky and crop out the grass/horizon. */}
       <div
         aria-hidden="true"
         className="absolute inset-0 bg-no-repeat"
@@ -103,13 +98,10 @@ export function Sidebar({ userEmail, isAdmin }: SidebarProps) {
           backgroundPosition: "center top",
         }}
       />
-      {/* Light pastel wash for legibility without washing the sky out */}
       <div
         aria-hidden="true"
         className="absolute inset-0 bg-gradient-to-b from-white/20 via-white/25 to-white/40"
       />
-      {/* Gradual right-side fade into the content surface so the sidebar melts
-          into the dashboard with no visible seam. */}
       <div
         aria-hidden="true"
         className="absolute inset-0"
@@ -147,7 +139,7 @@ export function Sidebar({ userEmail, isAdmin }: SidebarProps) {
 
         <div className="px-2 pb-2">
           <Link
-            href="/dashboard/carousels/new"
+            href="/dashboard/create"
             title={collapsed ? "Create" : undefined}
             className={cn(
               "flex items-center justify-center gap-2 rounded-xl border-2 border-black bg-[var(--ember)] py-2.5 font-semibold text-white shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000]",
@@ -160,7 +152,7 @@ export function Sidebar({ userEmail, isAdmin }: SidebarProps) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-1">
-          {navItems.map(renderItem)}
+          {mainNav.map(renderItem)}
 
           <div className="px-3 pb-1 pt-4">
             {!collapsed ? (

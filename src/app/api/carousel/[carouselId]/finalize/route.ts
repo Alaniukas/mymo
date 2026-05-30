@@ -4,6 +4,9 @@ import { rateLimit } from "@/lib/rate-limit";
 import { renderImageWithOverlay } from "@/lib/carousel/overlay";
 import { reuploadImage } from "@/lib/carousel/storage";
 import { getSizeForPlatform } from "@/lib/carousel/prompts";
+import { parseTemplateBlueprint } from "@/lib/carousel/template-blueprint";
+import { overlaySpecFromBlueprint, parseStoredTextZone, parseStoredSlideColors } from "@/lib/carousel/blueprint-overlay";
+import { trimBlueprintSlides } from "@/lib/carousel/studio-slide-count";
 
 // Canvas overlay work needs the Node runtime and headroom to download,
 // composite, and re-upload each slide. 60s is the safe ceiling across plans.
@@ -28,6 +31,7 @@ type SlideRow = {
   base_image_url?: string | null;
   layout?: string | null;
   role?: string | null;
+  text_zone?: unknown;
 };
 
 /**
@@ -63,6 +67,11 @@ export async function POST(
 
     const body = await request.json();
     const captionInputs = (body?.slides ?? []) as SlideCaptionInput[];
+    const postCaptionOverride =
+      typeof body?.post_caption === "string" ? body.post_caption.trim() : null;
+    const hashtagsOverride = Array.isArray(body?.hashtags)
+      ? body.hashtags.filter((h: unknown) => typeof h === "string")
+      : null;
 
     if (!Array.isArray(captionInputs) || captionInputs.length === 0) {
       return NextResponse.json(
@@ -73,7 +82,7 @@ export async function POST(
 
     const { data: carousel } = await supabase
       .from("carousels")
-      .select("id, workspace_id, platform")
+      .select("id, workspace_id, platform, template_id")
       .eq("id", carouselId)
       .single();
 
@@ -111,7 +120,7 @@ export async function POST(
     let slideRows: SlideRow[] = [];
     const full = await supabase
       .from("carousel_slides")
-      .select("id, position, image_url, base_image_url, layout, role")
+      .select("id, position, image_url, base_image_url, layout, role, text_zone")
       .eq("carousel_id", carouselId)
       .order("position", { ascending: true });
     if (!full.error) {
@@ -119,10 +128,34 @@ export async function POST(
     } else {
       const basic = await supabase
         .from("carousel_slides")
-        .select("id, position, image_url")
+        .select("id, position, image_url, base_image_url, layout, role")
         .eq("carousel_id", carouselId)
         .order("position", { ascending: true });
       slideRows = (basic.data ?? []) as SlideRow[];
+    }
+
+    const blueprintByPosition = new Map<
+      number,
+      ReturnType<typeof overlaySpecFromBlueprint>
+    >();
+    if (carousel.template_id) {
+      const { data: tpl } = await supabase
+        .from("carousel_templates")
+        .select("blueprint")
+        .eq("id", carousel.template_id)
+        .maybeSingle();
+      const blueprint = parseTemplateBlueprint(
+        (tpl as { blueprint?: unknown } | null)?.blueprint,
+      );
+      if (blueprint) {
+        const trimmed =
+          slideRows.length > 0 && blueprint.slides.length > slideRows.length
+            ? trimBlueprintSlides(blueprint, slideRows.length)
+            : blueprint;
+        for (const s of trimmed.slides) {
+          blueprintByPosition.set(s.position, overlaySpecFromBlueprint(s));
+        }
+      }
     }
 
     const slideById = new Map(slideRows.map((s) => [s.id, s]));
@@ -147,10 +180,30 @@ export async function POST(
       const role = slide.role ?? roleForPosition(slide.position, total);
       const finalPath = `${workspace.id}/${carouselId}/${slide.id}-final.png`;
 
+      const storedZone = parseStoredTextZone(slide.text_zone);
+      const storedColors = parseStoredSlideColors(slide.text_zone);
+      const bpSpec = blueprintByPosition.get(slide.position);
+      const layout =
+        slide.layout ?? bpSpec?.layout ?? "fullbleed_dark_overlay";
+      const textPlacement =
+        storedZone?.placement ?? bpSpec?.textPlacement ?? "center";
+      const textStyle = storedZone?.style ?? bpSpec?.textStyle ?? "headline";
+      const textAlignment =
+        storedZone?.alignment ?? bpSpec?.textAlignment ?? "center";
+
       const result = await reuploadImage(supabase, baseUrl, finalPath, "carousels", {
         transform: async ({ buffer }) => ({
           buffer: await renderImageWithOverlay(buffer, caption, role, {
-            layout: slide.layout ?? undefined,
+            layout,
+            textPlacement,
+            textStyle,
+            textAlignment,
+            textColor: storedColors.textColor ?? bpSpec?.textColor,
+            accentColor: bpSpec?.accentColor,
+            overlayStrength:
+              storedColors.overlayStrength ?? bpSpec?.overlayStrength,
+            hasUIChrome: bpSpec?.hasUIChrome,
+            textBBox: bpSpec?.textBBox,
             aspect,
             brandColor,
           }),
@@ -195,9 +248,13 @@ export async function POST(
     }
 
     if (updated > 0) {
+      const carouselUpdate: Record<string, unknown> = { status: "ready" };
+      if (postCaptionOverride) carouselUpdate.post_caption = postCaptionOverride;
+      if (hashtagsOverride) carouselUpdate.hashtags = hashtagsOverride;
+
       await supabase
         .from("carousels")
-        .update({ status: "ready" })
+        .update(carouselUpdate)
         .eq("id", carouselId);
     }
 

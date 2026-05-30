@@ -15,6 +15,10 @@ import { fetchMediaBuffer } from "@/lib/carousel/storage";
 import { overlayDimsForAspect } from "@/lib/carousel/overlay";
 import { renderClipReel } from "@/lib/carousel/video-export";
 import { getVideoAspectForPlatform } from "@/lib/carousel/video";
+import {
+  aggregateSlideCaptionsForPublish,
+  formatHashtagsForPublish,
+} from "@/lib/carousel/prompts";
 import { logContentEvent } from "@/lib/analytics/events";
 
 // Video carousels are combined into one MP4 with ffmpeg before publishing, so
@@ -113,14 +117,37 @@ async function resolvePublishCaption(
         .single();
       caption = combination?.caption ?? caption;
     }
+
+    if (!carousel.post_caption?.trim()) {
+      const { data: slideRows } = await supabase
+        .from("carousel_slides")
+        .select("position, caption")
+        .eq("carousel_id", carousel.id)
+        .order("position", { ascending: true });
+      const aggregated = aggregateSlideCaptionsForPublish(slideRows ?? []);
+      if (aggregated) caption = aggregated;
+    }
   }
 
   const tags = Array.isArray(carousel.hashtags) ? carousel.hashtags : [];
-  const formatted = tags
-    .map((t) => `#${String(t).replace(/^#+/, "").trim()}`)
-    .filter((t) => t.length > 1)
-    .join(" ");
+  const formatted = formatHashtagsForPublish(tags.map(String)).join(" ");
   return formatted ? `${caption}\n\n${formatted}` : caption;
+}
+
+function normalizePublishCaptionOverride(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const parts = trimmed.split(/\n\n+/);
+  if (parts.length < 2) return trimmed;
+  const last = parts[parts.length - 1]!;
+  if (!/^#\w/.test(last.trim())) return trimmed;
+  const body = parts.slice(0, -1).join("\n\n").trim();
+  const tags = last
+    .split(/\s+/)
+    .filter((t) => t.startsWith("#"))
+    .map((t) => t.replace(/^#+/, ""));
+  const formatted = formatHashtagsForPublish(tags).join(" ");
+  return formatted ? `${body}\n\n${formatted}` : body;
 }
 
 /** Image carousel → ordered media IDs for each completed slide image. */
@@ -349,8 +376,9 @@ export async function POST(
     // the angle/combination caption resolution.
     const trimmedOverride =
       typeof captionOverride === "string" ? captionOverride.trim() : "";
-    const caption =
-      trimmedOverride || (await resolvePublishCaption(supabase, carousel));
+    const caption = trimmedOverride
+      ? normalizePublishCaptionOverride(trimmedOverride)
+      : await resolvePublishCaption(supabase, carousel);
 
     const { data: postRecord, error: insertError } = await supabase
       .from("social_posts")

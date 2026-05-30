@@ -9,6 +9,8 @@ import {
   Plus,
 } from "lucide-react";
 import { useActiveProject } from "@/components/dashboard/project-provider";
+import { NichePicker } from "@/components/dashboard/niche-picker";
+import { nicheLabel, type NicheSlug } from "@/lib/carousel/niches";
 import { cn } from "@/lib/utils";
 
 // Always-visible project selector for the sidebar. Shows the active project,
@@ -19,6 +21,7 @@ export function ProjectSwitcher({ collapsed = false }: { collapsed?: boolean }) 
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [niche, setNiche] = useState<NicheSlug | null>("viral");
   const [submitting, setSubmitting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -36,12 +39,13 @@ export function ProjectSwitcher({ collapsed = false }: { collapsed?: boolean }) 
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || !niche) return;
     setSubmitting(true);
-    const id = await createProject(name);
+    const id = await createProject(name, niche);
     setSubmitting(false);
     if (id) {
       setName("");
+      setNiche("viral");
       setCreating(false);
       setOpen(false);
     }
@@ -121,24 +125,36 @@ export function ProjectSwitcher({ collapsed = false }: { collapsed?: boolean }) 
 
           <div className="mt-1 border-t-2 border-black/10 pt-1">
             {creating ? (
-              <form onSubmit={handleCreate} className="flex items-center gap-1.5 p-1">
+              <form onSubmit={handleCreate} className="space-y-2 p-2">
                 <input
                   autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Project name"
-                  className="min-w-0 flex-1 rounded-lg border-2 border-black px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ember)]"
+                  className="w-full rounded-lg border-2 border-black px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ember)]"
                 />
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#666]">
+                    Project type
+                  </p>
+                  <NichePicker
+                    value={niche}
+                    onChange={setNiche}
+                    disabled={submitting}
+                  />
+                </div>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 border-black bg-[var(--ember)] text-white disabled:opacity-60"
-                  aria-label="Create project"
+                  disabled={submitting || !niche}
+                  className="flex h-8 w-full items-center justify-center gap-1 rounded-lg border-2 border-black bg-[var(--ember)] text-sm font-semibold text-white disabled:opacity-60"
                 >
                   {submitting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Check className="h-4 w-4" />
+                    <>
+                      <Check className="h-4 w-4" />
+                      Create
+                    </>
                   )}
                 </button>
               </form>

@@ -4,12 +4,18 @@ import { rateLimit } from "@/lib/rate-limit";
 import {
   generateSlideCaptions,
   generateCaptionsForSlides,
+  generateCaptionsFromBlueprint,
+  generatePostCaption,
+  normalizeListSlideCaption,
 } from "@/lib/carousel/prompts";
-import type { BrandIdentity, GeneratedSlideRef } from "@/lib/carousel/prompts";
+import type { BrandIdentity, GeneratedSlideRef, SlideCaption } from "@/lib/carousel/prompts";
 import { getModelSettings } from "@/lib/settings/service";
 import { getUsableFramework } from "@/lib/carousel/frameworks";
 import { resolveFramework } from "@/lib/carousel/inject";
 import { brandProfileFromRow } from "@/lib/carousel/variables";
+import { parseTemplateBlueprint } from "@/lib/carousel/template-blueprint";
+import { ensureTemplateBlueprint } from "@/lib/carousel/persist-template-blueprint";
+import { trimBlueprintSlides } from "@/lib/carousel/studio-slide-count";
 import { resolveActiveWorkspaceId } from "@/lib/workspace/active";
 
 export async function POST(request: NextRequest) {
@@ -88,14 +94,33 @@ export async function POST(request: NextRequest) {
     // The images were generated first (one per selected asset); here we write a
     // caption that fits each actual slide, to be edited then burned on.
     if (carousel_id) {
-      const { data: carousel } = await supabase
+      let carouselRow: {
+        id: string;
+        platform: string;
+        title: string | null;
+        template_id?: string | null;
+      } | null = null;
+
+      const withTemplate = await supabase
         .from("carousels")
-        .select("id, platform, title")
+        .select("id, platform, title, template_id")
         .eq("id", carousel_id)
         .eq("workspace_id", workspace.id)
         .single();
 
-      if (!carousel) {
+      if (!withTemplate.error && withTemplate.data) {
+        carouselRow = withTemplate.data;
+      } else {
+        const basic = await supabase
+          .from("carousels")
+          .select("id, platform, title")
+          .eq("id", carousel_id)
+          .eq("workspace_id", workspace.id)
+          .single();
+        carouselRow = basic.data;
+      }
+
+      if (!carouselRow) {
         return NextResponse.json({ error: "Carousel not found" }, { status: 404 });
       }
 
@@ -137,12 +162,6 @@ export async function POST(request: NextRequest) {
       }
 
       const total = completed.length;
-      const brandIdentity: BrandIdentity = {
-        brand_tone: identity.brand_tone,
-        target_audience: identity.target_audience,
-        value_propositions: identity.value_propositions,
-        llm_summary: identity.llm_summary,
-      };
 
       const refs: GeneratedSlideRef[] = completed.map((s, i) => ({
         position: s.position,
@@ -151,16 +170,117 @@ export async function POST(request: NextRequest) {
         imageUrl: s.image_url,
       }));
 
-      const captions = await generateCaptionsForSlides(
-        brandIdentity,
-        carousel.platform,
-        refs,
-        carousel.title ?? "",
-        settings.text_model,
-        Boolean(imperfect),
-      );
+      const brandProfile = brandProfileFromRow(identity, workspace.app_url);
 
-      return NextResponse.json({ captions });
+      let captions: SlideCaption[] | undefined;
+      if (carouselRow.template_id) {
+        const { data: templateRow } = await supabase
+          .from("carousel_templates")
+          .select("blueprint, slides, caption")
+          .eq("id", carouselRow.template_id)
+          .maybeSingle();
+
+        let blueprint = parseTemplateBlueprint(templateRow?.blueprint);
+        if (!blueprint && templateRow?.slides) {
+          try {
+            blueprint = await ensureTemplateBlueprint(
+              supabase,
+              carouselRow.template_id,
+              {
+                slides: templateRow.slides,
+                caption: templateRow.caption,
+                model: settings.text_model,
+              },
+            );
+          } catch (err) {
+            console.warn("[generate-slide-captions] blueprint ensure failed:", err);
+          }
+        }
+
+        if (blueprint) {
+          const trimmedBlueprint =
+            completed.length < blueprint.slides.length
+              ? trimBlueprintSlides(blueprint, completed.length)
+              : blueprint;
+          captions = await generateCaptionsFromBlueprint(
+            brandProfile,
+            carouselRow.platform,
+            refs,
+            carouselRow.title ?? "",
+            trimmedBlueprint,
+            settings.text_model,
+            Boolean(imperfect),
+          );
+
+          if (captions) {
+            for (let i = 0; i < captions.length; i++) {
+              const bpSlide = trimmedBlueprint.slides.find(
+                (s) => s.position === captions![i]!.position,
+              );
+              if (bpSlide?.textZone.style === "list") {
+                captions[i] = {
+                  ...captions[i]!,
+                  caption: normalizeListSlideCaption(captions[i]!.caption),
+                };
+              }
+            }
+          }
+        }
+      }
+
+      if (!captions) {
+        const brandIdentity: BrandIdentity = {
+          brand_tone: identity.brand_tone,
+          target_audience: identity.target_audience,
+          value_propositions: identity.value_propositions,
+          llm_summary: identity.llm_summary,
+        };
+
+        captions = await generateCaptionsForSlides(
+          brandIdentity,
+          carouselRow.platform,
+          refs,
+          carouselRow.title ?? "",
+          settings.text_model,
+          Boolean(imperfect),
+        );
+      }
+
+      let postCaptionResult: { post_caption: string; hashtags: string[] } | null =
+        null;
+      try {
+        const { data: tplRow } = carouselRow.template_id
+          ? await supabase
+              .from("carousel_templates")
+              .select("blueprint")
+              .eq("id", carouselRow.template_id)
+              .maybeSingle()
+          : { data: null };
+        const bp = parseTemplateBlueprint(tplRow?.blueprint);
+        postCaptionResult = await generatePostCaption(
+          brandProfile,
+          carouselRow.platform,
+          carouselRow.title ?? "",
+          captions ?? [],
+          bp?.copyPattern,
+          settings.text_model,
+        );
+        await supabase
+          .from("carousels")
+          .update({
+            post_caption: postCaptionResult.post_caption,
+            hashtags: postCaptionResult.hashtags,
+          })
+          .eq("id", carousel_id);
+      } catch (err) {
+        console.warn("[generate-slide-captions] post caption failed:", err);
+      }
+
+      return NextResponse.json({
+        captions,
+        post_caption: postCaptionResult?.post_caption ?? null,
+        hashtags: postCaptionResult?.hashtags ?? [],
+      });
     }
 
     // ── Angle framework path: inject the Brain dictionary into the skeleton ──

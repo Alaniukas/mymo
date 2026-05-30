@@ -9,6 +9,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createProject as createProjectRow } from "@/lib/carousel/brand-identity";
+import { isNiche } from "@/lib/carousel/niches";
 import { ACTIVE_PROJECT_COOKIE, listProjects } from "./active";
 import { cleanupProjectStorage } from "./cleanup";
 
@@ -36,6 +37,7 @@ export type ProjectActionResult =
 /** Creates a project and makes it the active one. */
 export async function createProjectAction(
   name: string,
+  niche: string,
 ): Promise<ProjectActionResult> {
   const supabase = await createClient();
   const {
@@ -43,8 +45,12 @@ export async function createProjectAction(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Unauthorized" };
 
+  if (!isNiche(niche)) {
+    return { ok: false, error: "Project type is required." };
+  }
+
   try {
-    const created = await createProjectRow(supabase, user.id, { name });
+    const created = await createProjectRow(supabase, user.id, { name, niche });
     await writeActiveCookie(created.id);
     revalidatePath("/dashboard", "layout");
     return { ok: true, activeProjectId: created.id };

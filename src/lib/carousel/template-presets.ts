@@ -1,10 +1,8 @@
 // Starter template presets + niche presentation metadata.
 //
-// Presets are curated, code-defined "starter" carousel layouts (no scraped
-// images) so every niche always has a handful of selectable styles even before
-// a user imports their own. Selecting one seeds the Create flow with a topic,
-// slide count, and niche — it does NOT create a database row (real, importable
-// templates live in `carousel_templates`).
+// Presets are curated carousel layouts shown on the Templates page. Selecting
+// one materializes a real `carousel_templates` row (via /api/templates/from-preset)
+// so studio generation has slide images to replicate.
 
 import { NICHES, type NicheSlug } from "./niches";
 

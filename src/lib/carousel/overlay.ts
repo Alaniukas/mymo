@@ -28,6 +28,22 @@ export { overlayDimsForAspect };
 export interface OverlayOptions {
   /** Named layout (fullbleed_dark_overlay | split_compare | testimonial_card | notification_mock | text_only). */
   layout?: string;
+  /** Blueprint text placement — overrides default center text when set. */
+  textPlacement?: "top" | "center" | "bottom" | "card" | "none";
+  /** Blueprint text style — list renders bullet lines; body uses smaller type. */
+  textStyle?: "headline" | "body" | "list" | "quote" | "cta";
+  /** Horizontal alignment for on-image text. */
+  textAlignment?: "left" | "center" | "right";
+  /** Dominant caption color from blueprint (hex). */
+  textColor?: string | null;
+  /** Accent / card tint from blueprint (hex). */
+  accentColor?: string | null;
+  /** How heavy the dark scrim behind text should be. */
+  overlayStrength?: "light" | "medium" | "heavy";
+  /** Whether the slide uses review stars or similar UI chrome. */
+  hasUIChrome?: boolean;
+  /** Normalized 0–1 caption region from template AI analysis. */
+  textBBox?: { x: number; y: number; w: number; h: number };
   /** Aspect label; inferred from pixel dimensions when omitted. */
   aspect?: string;
   /** Brand color (hex) used to tint UI chrome where relevant. */
@@ -53,6 +69,14 @@ function compose(
     height,
     aspect: opts?.aspect ?? aspectFromDims(width, height),
     brandColor: opts?.brandColor ?? null,
+    textPlacement: opts?.textPlacement,
+    textStyle: opts?.textStyle,
+    textAlignment: opts?.textAlignment,
+    textColor: opts?.textColor,
+    accentColor: opts?.accentColor,
+    overlayStrength: opts?.overlayStrength,
+    hasUIChrome: opts?.hasUIChrome,
+    textBBox: opts?.textBBox,
   });
 }
 

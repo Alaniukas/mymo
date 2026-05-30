@@ -12,6 +12,7 @@ export interface TemplatePreviewSlide {
 }
 
 export interface TemplatePreviewData {
+  id?: string;
   title: string;
   caption?: string | null;
   sourceUrl?: string | null;
@@ -30,13 +31,18 @@ const PLATFORM_LABELS: Record<string, string> = {
  * swipeable, alongside the original caption and a link back to the post.
  */
 export function TemplatePreviewModal({
+  id,
   title,
   caption,
   sourceUrl,
   sourcePlatform,
   slides,
   onClose,
-}: TemplatePreviewData & { onClose: () => void }) {
+  onUseInCarousel,
+}: TemplatePreviewData & {
+  onClose: () => void;
+  onUseInCarousel?: (templateId: string) => void;
+}) {
   // Defend against unordered slide arrays so playback always matches the post.
   const ordered = [...slides].sort((a, b) => a.position - b.position);
   const count = ordered.length;
@@ -158,7 +164,7 @@ export function TemplatePreviewModal({
             </div>
           )}
 
-          {(caption || sourceUrl) && (
+          {(caption || sourceUrl || (id && onUseInCarousel)) && (
             <div className="px-5 py-4 space-y-3">
               {caption && (
                 <p className="text-sm text-[#444] whitespace-pre-wrap break-words">
@@ -174,6 +180,15 @@ export function TemplatePreviewModal({
                 >
                   <ExternalLink className="w-4 h-4" /> View original post
                 </a>
+              )}
+              {id && onUseInCarousel && (
+                <button
+                  type="button"
+                  onClick={() => onUseInCarousel(id)}
+                  className="w-full px-4 py-2.5 rounded-lg bg-[var(--ember)] hover:bg-[var(--ember-hover)] text-white text-sm font-semibold border-2 border-black"
+                >
+                  Use in carousel
+                </button>
               )}
             </div>
           )}

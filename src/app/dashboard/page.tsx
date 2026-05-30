@@ -1,17 +1,16 @@
 import Link from "next/link";
 import {
-  Globe,
-  ImagePlus,
+  Palette,
   LayoutTemplate,
   Layers,
   Link2,
   ArrowRight,
+  ImagePlus,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getActiveWorkspace } from "@/lib/workspace/active";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { ProjectOverview } from "@/components/dashboard/project-overview";
-import { nicheIdentityLabel } from "@/lib/carousel/niches";
 
 async function getProjectStats(workspaceId: string) {
   const supabase = await createClient();
@@ -55,10 +54,7 @@ async function getProjectStats(workspaceId: string) {
 }
 
 export default async function DashboardPage() {
-  const { activeProjectId, projects } = await getActiveWorkspace();
-
-  const niche = projects.find((p) => p.id === activeProjectId)?.niche ?? null;
-  const identityLabel = nicheIdentityLabel(niche);
+  const { activeProjectId } = await getActiveWorkspace();
 
   const stats = activeProjectId
     ? await getProjectStats(activeProjectId)
@@ -70,20 +66,20 @@ export default async function DashboardPage() {
         connectionCount: 0,
       };
 
+  const brandSetupDone = stats.hasIdentity;
+  const brandSetupValue = stats.hasIdentity
+    ? stats.assetCount > 0
+      ? `Active · ${stats.assetCount} images`
+      : "Identity set"
+    : "Not set";
+
   const quickActions = [
     {
-      label: `Set up ${identityLabel}`,
-      description: "Crawl your website to build a brand voice profile",
+      label: "Set up your brand",
+      description:
+        "Identity, colors, and product photos — one place for voice and images",
       href: "/dashboard/onboarding",
-      icon: Globe,
-      done: stats.hasIdentity,
-    },
-    {
-      label: "Upload Assets",
-      description: "Add your product, lifestyle, and UGC images",
-      href: "/dashboard/assets",
-      icon: ImagePlus,
-      done: stats.assetCount > 0,
+      done: brandSetupDone,
     },
     {
       label: "Add a Template",
@@ -93,9 +89,9 @@ export default async function DashboardPage() {
       done: stats.templateCount > 0,
     },
     {
-      label: "Create a Carousel",
-      description: "Generate AI slides from a template, then caption them",
-      href: "/dashboard/carousels/new",
+      label: "Create content",
+      description: "Brand story, viral memes, or classic template carousel",
+      href: "/dashboard/create",
       icon: Layers,
       done: stats.carouselCount > 0,
     },
@@ -123,11 +119,11 @@ export default async function DashboardPage() {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              label="Brand Identity"
-              value={stats.hasIdentity ? "Active" : "Not set"}
-              icon={Globe}
+              label="Brand setup"
+              value={brandSetupValue}
+              icon={Palette}
             />
-            <StatCard label="Assets" value={stats.assetCount} icon={ImagePlus} />
+            <StatCard label="Images" value={stats.assetCount} icon={ImagePlus} />
             <StatCard
               label="Carousels"
               value={stats.carouselCount}
@@ -143,35 +139,38 @@ export default async function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold mb-4">Get started</h2>
             <div className="space-y-3">
-              {quickActions.map((action, i) => (
-                <Link
-                  key={action.href}
-                  href={action.href}
-                  className="flex items-center gap-4 p-4 bg-white border-2 border-black rounded-xl shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000]"
-                >
-                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--ember)]/10 shrink-0">
-                    <span className="text-sm font-bold text-[var(--ember)]">
-                      {i + 1}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm">
-                        {action.label}
+              {quickActions.map((action, i) => {
+                const Icon = action.icon ?? Palette;
+                return (
+                  <Link
+                    key={action.href}
+                    href={action.href}
+                    className="flex items-center gap-4 p-4 bg-white border-2 border-black rounded-xl shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000]"
+                  >
+                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--ember)]/10 shrink-0">
+                      <span className="text-sm font-bold text-[var(--ember)]">
+                        {i + 1}
                       </span>
-                      {action.done && (
-                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                          Done
-                        </span>
-                      )}
                     </div>
-                    <p className="text-xs text-[#666] mt-0.5">
-                      {action.description}
-                    </p>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-[#999] shrink-0" />
-                </Link>
-              ))}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">
+                          {action.label}
+                        </span>
+                        {action.done && (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                            Done
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-[#666] mt-0.5">
+                        {action.description}
+                      </p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-[#999] shrink-0" />
+                  </Link>
+                );
+              })}
             </div>
           </div>
         </>

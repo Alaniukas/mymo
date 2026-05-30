@@ -7,6 +7,11 @@
  * Optional: APIFY_INSTAGRAM_ACTOR, APIFY_TIKTOK_ACTOR (actor id overrides)
  */
 
+import { detectPlatform, type ScrapedPlatform } from "./platform";
+
+export type { ScrapedPlatform } from "./platform";
+export { detectPlatform } from "./platform";
+
 const APIFY_BASE = "https://api.apify.com/v2";
 const INSTAGRAM_ACTOR =
   process.env.APIFY_INSTAGRAM_ACTOR ?? "apify~instagram-scraper";
@@ -15,8 +20,6 @@ const TIKTOK_ACTOR =
 
 /** Hard cap on imported slides (IG allows 10, TikTok up to 35). */
 const MAX_SLIDES = 20;
-
-export type ScrapedPlatform = "instagram" | "tiktok";
 
 /**
  * One slide of a scraped post. `imageUrl` is always the still that represents
@@ -36,19 +39,6 @@ export interface ScrapedCarousel {
 }
 
 type ApifyItem = Record<string, unknown>;
-
-/** Returns the platform for a URL, or null if it is not IG/TikTok. */
-export function detectPlatform(url: string): ScrapedPlatform | null {
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-  if (hostname.includes("instagram.com")) return "instagram";
-  if (hostname.includes("tiktok.com")) return "tiktok";
-  return null;
-}
 
 function isHttpUrl(value: unknown): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);

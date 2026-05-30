@@ -8,7 +8,7 @@ import { nicheLabel, type NicheSlug } from "./niches";
 
 const BRAND_PARSE_INTRO = `You are a brand analyst. Given the text content scraped from a website, extract a structured brand profile that will power on-brand social content. This profile fills the placeholders our content templates inject, so be concrete and specific — favor the words a real customer would use over marketing fluff.`;
 
-const BRAND_PARSE_SHAPE = `Respond ONLY with valid JSON in this exact shape. Use "" for unknown strings and [] for unknown lists — never null, and never invent facts that aren't supported by the text:
+const BRAND_PARSE_SHAPE = `Respond ONLY with valid JSON in this exact shape. Use "" for unknown strings and [] for unknown lists — never null, and never invent facts that aren't supported by the text. Escape any double quotes inside string values as \\". Keep string values on a single line (no raw line breaks inside strings):
 {
   "app_name": "the product / brand name",
   "app_category": "what the product is, in plain words (e.g. 'AI meeting-notes app')",
@@ -26,6 +26,7 @@ const BRAND_PARSE_SHAPE = `Respond ONLY with valid JSON in this exact shape. Use
   "metric_result": "a quantified win if present (e.g. 'saved 12 hrs/week'), else ''",
   "cta_text": "the primary action verb phrase (e.g. 'Try it free', 'Shop now')",
   "brand_color": "the primary brand color as a hex value if detectable (e.g. '#5B3DF5'), else ''",
+  "logo_url": "URL of the brand logo image if discoverable in the source, else ''",
   "product_terminology": {"term": "definition"},
   "brand_dna": "the brand's DNA in 1-2 vivid sentences — its personality, point of view, and what makes its voice unmistakable (e.g. 'A scrappy, no-BS coach who treats fitness like engineering — blunt, data-driven, and allergic to hype.')",
   "summary": "a 2-3 sentence summary of what the product does and who it serves"

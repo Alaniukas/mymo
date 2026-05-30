@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Check, FolderKanban, Globe, Loader2, Plus, Trash2 } from "lucide-react";
 import { useActiveProject } from "@/components/dashboard/project-provider";
+import { NichePicker } from "@/components/dashboard/niche-picker";
+import { isNiche, nicheLabel, type NicheSlug } from "@/lib/carousel/niches";
 import { cn } from "@/lib/utils";
 
 // Project management surface for the Overview tab: list, select, create, and
@@ -18,18 +20,20 @@ export function ProjectOverview() {
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [niche, setNiche] = useState<NicheSlug | null>("viral");
   const [submitting, setSubmitting] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || !niche) return;
     setSubmitting(true);
-    const id = await createProject(name);
+    const id = await createProject(name, niche);
     setSubmitting(false);
     if (id) {
       setName("");
+      setNiche("viral");
       setCreating(false);
     }
   }
@@ -49,8 +53,8 @@ export function ProjectOverview() {
         <div>
           <h2 className="text-lg font-semibold">Projects</h2>
           <p className="text-sm text-[#666]">
-            Each project keeps its own brand identity, assets, carousels, and
-            connected accounts.
+            Each project keeps its own brand identity, assets, carousels,
+            templates, and connected accounts.
           </p>
         </div>
         {!empty && !creating && (
@@ -68,7 +72,7 @@ export function ProjectOverview() {
       {(creating || empty) && (
         <form
           onSubmit={handleCreate}
-          className="flex flex-col gap-3 rounded-xl border-2 border-black bg-white p-5 shadow-[4px_4px_0_0_#000] sm:flex-row sm:items-end"
+          className="flex flex-col gap-4 rounded-xl border-2 border-black bg-white p-5 shadow-[4px_4px_0_0_#000]"
         >
           <div className="flex-1">
             <label
@@ -86,10 +90,21 @@ export function ProjectOverview() {
               className="w-full rounded-lg border-2 border-black px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-[var(--ember)]"
             />
           </div>
+          <div>
+            <p className="mb-2 block text-sm font-medium">
+              What is this project for?
+            </p>
+            <NichePicker
+              value={niche}
+              onChange={setNiche}
+              disabled={submitting}
+              variant="cards"
+            />
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !niche}
               className="flex items-center gap-2 rounded-lg border-2 border-black bg-[var(--ember)] px-5 py-2.5 font-semibold text-white shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000] disabled:opacity-60 disabled:pointer-events-none"
             >
               {submitting ? (
@@ -105,6 +120,7 @@ export function ProjectOverview() {
                 onClick={() => {
                   setCreating(false);
                   setName("");
+                  setNiche("viral");
                 }}
                 className="rounded-lg border-2 border-black bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:bg-gray-50"
               >
@@ -157,6 +173,10 @@ export function ProjectOverview() {
                         <span className="truncate">
                           {p.app_url.replace(/^https?:\/\//, "")}
                         </span>
+                      </span>
+                    ) : p.niche && isNiche(p.niche) ? (
+                      <span className="mt-0.5 block text-xs text-[#666]">
+                        {nicheLabel(p.niche)}
                       </span>
                     ) : (
                       <span className="mt-0.5 block text-xs text-[#999]">

@@ -186,6 +186,7 @@ export function buildImagePayload(
     errors.push(
       `Prompt exceeds max length (${prompt.length}/${config.maxPromptLength})`,
     );
+    prompt = prompt.slice(0, config.maxPromptLength);
   }
 
   const size = clampToSet(

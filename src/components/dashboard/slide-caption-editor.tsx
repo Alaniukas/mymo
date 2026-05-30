@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { formatHashtagsForPublish } from "@/lib/carousel/prompts";
 
 interface EditorSlide {
   id: string;
@@ -13,6 +14,8 @@ interface SlideCaptionEditorProps {
   carouselId: string;
   slides: EditorSlide[];
   initialCaptions: { position: number; caption: string }[];
+  initialPostCaption?: string;
+  initialHashtags?: string[];
   onFinalized: () => void;
 }
 
@@ -26,12 +29,18 @@ export function SlideCaptionEditor({
   carouselId,
   slides,
   initialCaptions,
+  initialPostCaption = "",
+  initialHashtags = [],
   onFinalized,
 }: SlideCaptionEditorProps) {
   const initialMap: Record<number, string> = {};
   for (const c of initialCaptions) initialMap[c.position] = c.caption;
 
   const [captions, setCaptions] = useState<Record<number, string>>(initialMap);
+  const [postCaption, setPostCaption] = useState(initialPostCaption);
+  const [hashtagsText, setHashtagsText] = useState(
+    initialHashtags.map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" "),
+  );
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,10 +60,18 @@ export function SlideCaptionEditor({
         caption: (captions[s.position] ?? "").trim(),
       }));
 
+      const hashtagList = formatHashtagsForPublish(
+        hashtagsText.split(/\s+/).filter(Boolean),
+      ).map((t) => t.replace(/^#/, ""));
+
       const res = await fetch(`/api/carousel/${carouselId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slides: payload }),
+        body: JSON.stringify({
+          slides: payload,
+          post_caption: postCaption.trim(),
+          hashtags: hashtagList,
+        }),
       });
 
       const data = await res.json();
@@ -78,8 +95,8 @@ export function SlideCaptionEditor({
     <div className="space-y-6">
       <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-5 py-4">
         <p className="text-sm text-amber-800 font-medium">
-          Your slides are generated. These captions are written to fit each
-          slide and will be burned onto the images. Edit them, then finalize.
+          Your slides are generated. Edit on-slide captions and the social post
+          caption below, then finalize to burn text onto the images.
         </p>
       </div>
 
@@ -117,6 +134,31 @@ export function SlideCaptionEditor({
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="bg-white border-2 border-black rounded-xl p-5 shadow-[3px_3px_0_0_#000] space-y-3">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-[#666]">
+          Post caption (Instagram / TikTok)
+        </h3>
+        <textarea
+          value={postCaption}
+          onChange={(e) => setPostCaption(e.target.value)}
+          rows={4}
+          placeholder="Caption for the post when you publish..."
+          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ember)] focus:border-transparent resize-y"
+        />
+        <div>
+          <label className="block text-xs font-semibold text-[#666] mb-1">
+            Hashtags
+          </label>
+          <input
+            type="text"
+            value={hashtagsText}
+            onChange={(e) => setHashtagsText(e.target.value)}
+            placeholder="#brand #niche #tips"
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ember)] focus:border-transparent"
+          />
+        </div>
       </div>
 
       {error && (

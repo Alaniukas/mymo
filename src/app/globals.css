@@ -1,26 +1,84 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fbf9f6;
+  --foreground: #0a0a0a;
+  --surface: #fbf9f6;
+  --ember: #e85d24;
+  --ember-hover: #d0521f;
+  --primary: #eb512b;
+  --primary-foreground: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
+  --animate-marquee: marquee var(--duration, 40s) linear infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-100% - var(--gap, 1rem)));
   }
 }
 
+.font-gambarino,
+.font-gelica {
+  font-family: "Gambarino", var(--font-serif), serif;
+}
+
+.phone-shadow {
+  box-shadow: 4px 4px 0 0 #000;
+}
+
+.btn-3d {
+  box-shadow: 4px 4px 0 0 #000;
+  transition:
+    transform 0.2s ease-out,
+    box-shadow 0.2s ease-out;
+}
+
+.btn-3d:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 #000;
+}
+
+.btn-3d:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 0 #000;
+}
+
+@keyframes scroll-up {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+
+.animate-scroll-up {
+  animation: scroll-up 40s linear infinite;
+}
+
+.animate-scroll-up-slow {
+  animation: scroll-up 55s linear infinite;
+}
+
+.animate-scroll-up-fast {
+  animation: scroll-up 35s linear infinite;
+}
+
+.font-inter-display {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
 body {
-  background: var(--background);
+  background: var(--surface);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

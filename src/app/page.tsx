@@ -1,65 +1,133 @@
-import Image from "next/image";
+import { LandingCompare } from "@/components/landing-compare";
+import { LandingFAQ } from "@/components/landing-faq";
+import { LandingFinalCTA } from "@/components/landing-final-cta";
+import { LandingHero } from "@/components/landing-hero";
+import { MarketingFooter } from "@/components/marketing-footer";
+import { MarketingNavbar } from "@/components/marketing-navbar";
 
-export default function Home() {
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      name: "Mymo",
+      applicationCategory: "BusinessApplication",
+      applicationSubCategory: "Advertising",
+      operatingSystem: "Web",
+      url: "https://www.trymymo.com/",
+      offers: {
+        "@type": "AggregateOffer",
+        priceCurrency: "USD",
+        lowPrice: "19",
+        highPrice: "49",
+        offerCount: "2",
+        availability: "https://schema.org/InStock",
+      },
+      description:
+        "Mymo generates AI UGC video ads and product videos for Shopify and DTC brands. 1000+ proven templates, 100+ AI actors, Meta-ready exports — add your product and export in 2 minutes.",
+      aggregateRating: {
+        "@type": "AggregateRating",
+        ratingValue: "4.8",
+        reviewCount: "147",
+        bestRating: "5",
+        worstRating: "1",
+      },
+    },
+    {
+      "@type": "Organization",
+      name: "Mymo",
+      url: "https://www.trymymo.com/",
+      logo: "https://www.trymymo.com/logo_original.jpeg",
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: "How long does it take to generate one ad?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "About 2–3 minutes from picking a template to an export-ready video.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Can I customize the script and actor?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. Every line is editable, and you can swap actors or adjust tone per scene.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "What platforms do videos export to?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "TikTok, Instagram Reels, YouTube Shorts, and Meta Ads — with captions baked in.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "How realistic do the AI actors look?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Viewers can't distinguish them from real creators in blind tests. Natural lip-sync, expressions, and body language.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Is there a free trial?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Our 7-day intro is $19 and includes 40 credits, 5 video downloads, and 5 B-roll generations. After 7 days it auto-renews at $49/month — cancel anytime.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Do I own the videos I create?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. Every video is yours to use commercially. No royalties, no attribution, no extra fees.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Can I use my own product footage?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. Upload product photos or B-roll clips and we'll splice them into the AI-generated presenter segments.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Who's responsible for the output?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "All templates are AI-generated. The creator of the final video is responsible for reviewing and following platform policies.",
+          },
+        },
+      ],
+    },
+  ],
+};
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <MarketingNavbar />
+      <div className="min-h-[calc(100vh-48px)]">
+        <div className="min-h-screen bg-[var(--surface)]">
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          />
+          <LandingHero />
+          <LandingCompare />
+          <LandingFAQ />
+          <LandingFinalCTA />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+      <MarketingFooter />
+    </>
   );
 }

@@ -161,8 +161,8 @@ export default function CarouselsPage() {
           </p>
         </div>
         <Link
-          href="/dashboard/carousels/new"
-          className="px-5 py-2.5 rounded-lg bg-[var(--ember)] hover:bg-[var(--ember-hover)] text-white font-semibold border-2 border-black shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000] flex items-center gap-2"
+        href="/dashboard/create"
+        className="px-5 py-2.5 rounded-lg bg-[var(--ember)] hover:bg-[var(--ember-hover)] text-white font-semibold border-2 border-black shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000] flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
           Create Carousel
@@ -177,7 +177,7 @@ export default function CarouselsPage() {
             Create your first AI-generated carousel from a template.
           </p>
           <Link
-            href="/dashboard/carousels/new"
+            href="/dashboard/create"
             className="inline-flex items-center px-5 py-2.5 rounded-lg bg-[var(--ember)] text-white font-semibold border-2 border-black shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000]"
           >
             Create Carousel

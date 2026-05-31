@@ -31,6 +31,9 @@ export interface CarouselSlideRow {
   // Framework metadata (migration 010); absent on un-migrated DBs.
   layout?: string | null;
   role?: string | null;
+  // Per-slide image->video motion direction (migration 025); absent on
+  // un-migrated DBs. When set, it overrides the generic cinematic motion.
+  motion_prompt?: string | null;
 }
 
 // Video clips are larger and slower than images, so we give the video phase a
@@ -57,11 +60,57 @@ function roleForSlide(position: number, totalSlides: number): string {
 // A single, shared cinematic motion language across every slide is what makes
 // the clips read as one continuous carousel idea rather than disjointed shots.
 
+export type VideoPromptStyle = "carousel" | "founder_hook";
+
+/**
+ * Image-to-video prompt for founder hook openers: silent emotional reaction only.
+ * The hook line is burned on afterward — the model must NOT speak, lip-sync, or
+ * render subtitles/captions in the generated clip.
+ */
+export function buildFounderHookVideoPrompt(motionOverride?: string | null): string {
+  const motion = motionOverride?.trim();
+  const parts = [
+    "Animate this still photo into a short, silent UGC reaction clip filmed on a phone — NO dialogue and NO speech.",
+    motion
+      ? `Emotional performance (silent, no talking): ${motion}.`
+      : "Subtle, believable emotional facial expression and small head or shoulder movement — a silent reaction to camera.",
+    "Mouth stays relaxed and closed or nearly closed — do NOT lip-sync, mouth words, or open the mouth as if speaking.",
+    "No voice, no dialogue audio, no whispering, no singing.",
+    "Absolutely NO subtitles, captions, text overlays, logos, or watermarks in the video — the image has no text and you must not add any.",
+    "One continuous handheld shot — no cuts, scene changes, or camera whips.",
+    "Natural skin texture, realistic lighting, authentic front-camera UGC feel.",
+  ];
+  return parts.join(" ");
+}
+
 export function buildVideoPrompt(
   caption: string,
   role: string,
   brand: BrandIdentity,
+  motionOverride?: string | null,
+  style: VideoPromptStyle = "carousel",
 ): string {
+  if (style === "founder_hook") {
+    return buildFounderHookVideoPrompt(motionOverride);
+  }
+
+  const motion = motionOverride?.trim();
+
+  // Per-slide creative direction (e.g. an emotional UGC creator hook that should
+  // perform a specific motion like "tears of joy"). Animate the person, not just
+  // the camera, so the planned performance actually plays on screen.
+  if (motion) {
+    const parts = [
+      "Animate this still photo into a short, natural, talking-to-camera UGC video clip, as if filmed on a phone.",
+      `Motion and performance: ${motion}.`,
+      "Render realistic, expressive facial movement and subtle, believable body and head motion that match that emotion.",
+      "Keep any on-image text perfectly static, sharp, and legible — do not warp, move, distort, or add any text.",
+      "One continuous handheld shot — no scene changes, cuts, captions, or watermarks.",
+    ];
+    if (caption) parts.push(`The on-screen line is: "${caption}".`);
+    return parts.join(" ");
+  }
+
   const tone = brand.brand_tone ?? "professional and modern";
 
   const energy =
@@ -117,6 +166,8 @@ export async function submitSlideVideo(
     platform: string;
     brand: BrandIdentity;
     totalSlides: number;
+    /** Founder hook opener: silent reaction clip, no synced speech or model subtitles. */
+    founderHook?: boolean;
   },
 ): Promise<void> {
   if (!slide.image_url) {
@@ -141,10 +192,19 @@ export async function submitSlideVideo(
   slide.video_status = "generating";
 
   const role = roleForSlide(slide.position, opts.totalSlides);
-  const prompt = buildVideoPrompt(slide.caption ?? "", role, opts.brand);
+  const founderHook = Boolean(opts.founderHook);
+  const prompt = buildVideoPrompt(
+    slide.caption ?? "",
+    role,
+    opts.brand,
+    slide.motion_prompt,
+    founderHook ? "founder_hook" : "carousel",
+  );
   const { payload } = buildVideoPayload(opts.model, prompt, {
     imageUrls: [slide.image_url],
     aspect: getVideoAspectForPlatform(opts.platform),
+    // Synced speech/audio from Seedance often implies lip-sync + talking; keep hooks silent.
+    generateAudio: founderHook ? false : undefined,
   });
 
   try {
@@ -190,6 +250,7 @@ export async function completeSlideVideo(
           caption,
           roleForSlide(slide.position, opts.totalSlides),
           getVideoAspectForPlatform(opts.platform),
+          { layout: slide.layout ?? undefined },
         );
         contentType = "video/mp4";
       } catch (err) {
@@ -266,6 +327,7 @@ export async function runVideoPhase(
     platform: string;
     brand: BrandIdentity;
     totalSlides: number;
+    founderHook?: boolean;
   },
 ): Promise<void> {
   for (const slide of slides) {
@@ -281,6 +343,7 @@ export async function runVideoPhase(
         platform: opts.platform,
         brand: opts.brand,
         totalSlides: opts.totalSlides,
+        founderHook: opts.founderHook,
       });
       continue;
     }

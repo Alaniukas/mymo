@@ -3,48 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Type } from "lucide-react";
 import { useActiveProject } from "@/components/dashboard/project-provider";
+import { ImperfectCopyToggle } from "@/components/dashboard/imperfect-copy-toggle";
 import { NoProjectNotice } from "@/components/dashboard/no-project";
-import { cn } from "@/lib/utils";
-import type {
-  StoryCarouselMediaMode,
-  StoryNarrativeAngle,
-} from "@/lib/stories/types";
-
-const MEDIA_MODES: {
-  id: StoryCarouselMediaMode;
-  label: string;
-  hint: string;
-}[] = [
-  {
-    id: "text_only",
-    label: "Text only",
-    hint: "Black/white slides — typography carries the story",
-  },
-  {
-    id: "with_images",
-    label: "With AI images",
-    hint: "Generated photos that follow the same story line",
-  },
-];
-
-const NARRATIVE_ANGLES: {
-  id: StoryNarrativeAngle;
-  label: string;
-  hint: string;
-}[] = [
-  {
-    id: "follower_growth",
-    label: "Story series",
-    hint: "Serial narrative built to grow followers through saves & shares",
-  },
-  {
-    id: "brand_experience",
-    label: "Brand experience",
-    hint: "Dramatized client moment — on-brand, scroll-stopping, fictionalized",
-  },
-];
 
 async function pollUntilReady(carouselId: string): Promise<void> {
   for (let i = 0; i < 120; i++) {
@@ -79,17 +41,15 @@ async function finalizeCarousel(
   });
 }
 
-export default function StoryCarouselPage() {
+export default function SimpleTextCarouselPage() {
   const router = useRouter();
   const { activeProjectId } = useActiveProject();
 
-  const [mediaMode, setMediaMode] = useState<StoryCarouselMediaMode>("text_only");
-  const [narrativeAngle, setNarrativeAngle] =
-    useState<StoryNarrativeAngle>("follower_growth");
   const [topic, setTopic] = useState("");
   const [context, setContext] = useState("");
   const [slideCount, setSlideCount] = useState(6);
   const [platform, setPlatform] = useState("instagram");
+  const [imperfect, setImperfect] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,12 +63,13 @@ export default function StoryCarouselPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          media_mode: mediaMode,
-          narrative_angle: narrativeAngle,
+          media_mode: "text_only",
+          narrative_angle: "follower_growth",
           topic,
           context,
           slide_count: slideCount,
           platform,
+          imperfect,
         }),
       });
 
@@ -140,86 +101,24 @@ export default function StoryCarouselPage() {
       </Link>
 
       <div className="mb-2 flex items-center gap-2">
-        <BookOpen className="h-6 w-6" />
-        <h1 className="text-2xl font-bold tracking-tight">Story Carousel</h1>
+        <Type className="h-6 w-6" />
+        <h1 className="text-2xl font-bold tracking-tight">Simple Text Carousel</h1>
       </div>
       <p className="text-sm text-[#555]">
-        Build a follower base with serial swipe stories — simple text slides or
-        AI imagery that keeps one story line from hook to CTA.
+        Clean black &amp; white text slides, written by AI from your topic and
+        brand — typography carries the message from hook to CTA.
       </p>
 
       <div className="mt-8 space-y-6">
         <div>
-          <label className="text-sm font-semibold">Visual style</label>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {MEDIA_MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setMediaMode(m.id)}
-                className={cn(
-                  "rounded-xl border-2 px-4 py-3 text-left transition",
-                  mediaMode === m.id
-                    ? "border-black bg-[#1a1a1a] text-white"
-                    : "border-black/15 bg-white hover:border-black/40",
-                )}
-              >
-                <span className="block text-sm font-semibold">{m.label}</span>
-                <span
-                  className={cn(
-                    "mt-0.5 block text-xs",
-                    mediaMode === m.id ? "text-white/70" : "text-[#666]",
-                  )}
-                >
-                  {m.hint}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="text-sm font-semibold">Story angle</label>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {NARRATIVE_ANGLES.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => setNarrativeAngle(a.id)}
-                className={cn(
-                  "rounded-xl border-2 px-4 py-3 text-left transition",
-                  narrativeAngle === a.id
-                    ? "border-black bg-black text-white"
-                    : "border-black/15 bg-white hover:border-black/40",
-                )}
-              >
-                <span className="block text-sm font-semibold">{a.label}</span>
-                <span
-                  className={cn(
-                    "mt-0.5 block text-xs",
-                    narrativeAngle === a.id ? "text-white/70" : "text-[#666]",
-                  )}
-                >
-                  {a.hint}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
           <label className="text-sm font-semibold" htmlFor="topic">
-            Story topic
+            Topic
           </label>
           <input
             id="topic"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder={
-              narrativeAngle === "brand_experience"
-                ? "e.g. The client who almost quit — then this happened"
-                : "e.g. How I went from 0 to 10k without ads"
-            }
+            placeholder="e.g. 3 mistakes founders make when launching their app"
             className="mt-2 w-full rounded-xl border-2 border-black/15 px-3 py-2.5 text-sm focus:border-black focus:outline-none"
           />
         </div>
@@ -233,7 +132,7 @@ export default function StoryCarouselPage() {
             value={context}
             onChange={(e) => setContext(e.target.value)}
             rows={3}
-            placeholder="Plot beats, brand details, tone notes…"
+            placeholder="Key points, brand details, tone notes…"
             className="mt-2 w-full rounded-xl border-2 border-black/15 px-3 py-2.5 text-sm focus:border-black focus:outline-none"
           />
         </div>
@@ -266,6 +165,13 @@ export default function StoryCarouselPage() {
           </div>
         </div>
 
+        <ImperfectCopyToggle
+          enabled={imperfect}
+          onChange={setImperfect}
+          id="simple-carousel-imperfect"
+          description="Adds subtle typos and casual wording on each slide so the carousel reads raw and human — not polished AI."
+        />
+
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
@@ -281,12 +187,12 @@ export default function StoryCarouselPage() {
           {generating ? (
             <>
               <Loader2 className="h-5 w-5 animate-spin" />
-              Writing your story…
+              Writing your carousel…
             </>
           ) : (
             <>
               <Sparkles className="h-5 w-5" />
-              Generate story carousel
+              Generate text carousel
             </>
           )}
         </button>

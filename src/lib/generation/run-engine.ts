@@ -46,7 +46,7 @@ export interface EngineSlidePlan {
   textColor?: string;
 }
 
-async function insertCarousel(
+export async function insertCarousel(
   supabase: DB,
   row: Record<string, unknown>,
 ): Promise<{ id: string } | null> {
@@ -77,7 +77,7 @@ async function insertCarousel(
   return error || !data ? null : (data as { id: string });
 }
 
-async function insertSlides(
+export async function insertSlides(
   supabase: DB,
   slideRows: Record<string, unknown>[],
 ): Promise<string | null> {
@@ -90,6 +90,7 @@ async function insertSlides(
     delete copy.role;
     delete copy.base_image_url;
     delete copy.text_zone;
+    delete copy.motion_prompt;
     return copy;
   });
   const { error: retryErr } = await supabase
@@ -433,6 +434,7 @@ export async function runStoryCarouselEngine(
     context?: string;
     slideCount: number;
     platform: string;
+    imperfect?: boolean;
   },
 ) {
   const { data: identity } = await supabase
@@ -464,6 +466,7 @@ export async function runStoryCarouselEngine(
     slideCount: opts.slideCount,
     platform: opts.platform,
     model: settings.text_model,
+    imperfect: opts.imperfect,
   });
 
   const carousel = await insertCarousel(supabase, {
@@ -482,6 +485,7 @@ export async function runStoryCarouselEngine(
       narrativeAngle: opts.narrativeAngle,
       storyLine: plan.storyLine,
       visualTheme: plan.visualTheme,
+      imperfect: Boolean(opts.imperfect),
     },
   });
 

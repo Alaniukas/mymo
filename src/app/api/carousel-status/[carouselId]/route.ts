@@ -5,6 +5,7 @@ import { checkTaskStatus, EvolinkError } from "@/lib/evolink/client";
 import { reuploadImage } from "@/lib/carousel/storage";
 import { renderImageWithOverlay } from "@/lib/carousel/overlay";
 import { getModelSettings } from "@/lib/settings/service";
+import { resolveHookVideoModel } from "@/lib/settings/models";
 import { DEFAULT_VIDEO_MODEL } from "@/lib/evolink/video-models";
 import { runVideoPhase, type CarouselSlideRow } from "@/lib/carousel/video";
 import { getSizeForPlatform } from "@/lib/carousel/prompts";
@@ -31,6 +32,7 @@ type CarouselRow = {
   platform: string;
   slide_count: number | null;
   media_type: string;
+  content_type?: string | null;
 };
 
 async function markSlideFailed(supabase: DB, slide: CarouselSlideRow) {
@@ -121,7 +123,7 @@ async function loadCarousel(
 ): Promise<CarouselRow | null> {
   const full = await supabase
     .from("carousels")
-    .select("id, workspace_id, status, platform, slide_count, media_type")
+    .select("id, workspace_id, status, platform, slide_count, media_type, content_type")
     .eq("id", carouselId)
     .single();
 
@@ -156,6 +158,7 @@ async function loadSlides(
   const withCaption = `${base}, caption`;
   const withVideo = `${withCaption}, video_status, video_task_id, video_url, video_storage_path`;
   const full = `${withVideo}, layout, role`;
+  const fullest = `${full}, motion_prompt`;
 
   const query = (sel: string) =>
     supabase
@@ -164,7 +167,11 @@ async function loadSlides(
       .eq("carousel_id", carouselId)
       .order("position", { ascending: true });
 
-  let res = await query(full);
+  // motion_prompt missing (pre-migration 025) → retry without it.
+  let res = await query(fullest);
+  if (!res.error) return (res.data ?? []) as unknown as CarouselSlideRow[];
+
+  res = await query(full);
   if (!res.error) return (res.data ?? []) as unknown as CarouselSlideRow[];
 
   // layout/role missing (pre-migration 010) → retry without them.
@@ -305,14 +312,19 @@ export async function GET(
       };
 
       const settings = await getModelSettings(supabase);
+      const videoModel =
+        carousel.content_type === "founder_hook"
+          ? resolveHookVideoModel(settings)
+          : settings.video_model || DEFAULT_VIDEO_MODEL;
 
       await runVideoPhase(supabase, slides, {
         workspaceId: workspace.id,
         carouselId,
-        model: settings.video_model || DEFAULT_VIDEO_MODEL,
+        model: videoModel,
         platform: carousel.platform,
         brand,
         totalSlides: carousel.slide_count ?? slides.length,
+        founderHook: carousel.content_type === "founder_hook",
       });
     }
 

@@ -128,7 +128,7 @@ export default function LibraryPage() {
       ) : items.length === 0 ? (
         <div className="text-center py-16 text-[#666] text-sm">
           No content in this view yet.{" "}
-          <Link href="/dashboard/carousels/new" className="font-semibold underline">
+          <Link href="/dashboard/create" className="font-semibold underline">
             Create a carousel
           </Link>
         </div>

@@ -47,6 +47,8 @@ export function drawLayout(ctx: SKRSContext2D, lc: LayoutContext): void {
       return drawEditorialSplit(ctx, lc);
     case "split_compare":
       return drawSplitCompare(ctx, lc);
+    case "tiktok_caption":
+      return drawTikTokCaption(ctx, lc);
     case "text_only":
       return drawFullbleed(ctx, lc, scrimAlpha(lc, 0));
     case "fullbleed_dark_overlay":
@@ -155,6 +157,75 @@ function startFont(role: string, width: number): number {
   if (role === "hook") return width * 0.11;
   if (role === "cta") return width * 0.092;
   return width * 0.078;
+}
+
+/**
+ * Minimalist TikTok / Instagram Reels caption: a single rounded, semi-transparent
+ * black "sticker" sized to the text, with bold white type centered horizontally.
+ * Used by the Founder Hook Reels engine for the AI hook clip and the app-demo
+ * storyline lines. Anchored in the lower-middle of the safe area (clear of the
+ * platform feed UI) so it reads like a native caption rather than an ad banner.
+ */
+function drawTikTokCaption(ctx: SKRSContext2D, lc: LayoutContext): void {
+  const { width, height, aspect } = lc;
+  const clean = lc.caption.trim();
+  if (!clean) return;
+
+  const ins = safeInsets(width, height, aspect);
+  const usableTop = ins.top;
+  const usableBottom = height - ins.bottom;
+  const usableH = Math.max(1, usableBottom - usableTop);
+
+  const maxBoxW = width - ins.left - ins.right;
+  const padX = width * 0.038;
+  const padY = width * 0.024;
+
+  const layout = fitText(
+    ctx,
+    clean,
+    maxBoxW - padX * 2,
+    usableH * 0.5,
+    width * 0.058,
+    width * 0.032,
+    FONT_FAMILY_BODY,
+  );
+
+  // Size the sticker to the actual rendered text so it hugs the caption.
+  ctx.font = `${layout.fontSize}px "${FONT_FAMILY_BODY}"`;
+  const widestLine = layout.lines.reduce(
+    (w, line) => Math.max(w, ctx.measureText(line).width),
+    0,
+  );
+  const textBlockH = layout.lines.length * layout.lineHeight;
+
+  const boxW = Math.min(maxBoxW, widestLine + padX * 2);
+  const boxH = textBlockH + padY * 2;
+  const boxX = (width - boxW) / 2;
+
+  // Anchor ~62% down the safe area, clamped so the sticker stays inside it.
+  const desiredCenter = usableTop + usableH * 0.62;
+  const centerY = Math.min(
+    Math.max(desiredCenter, usableTop + boxH / 2),
+    usableBottom - boxH / 2,
+  );
+  const boxY = centerY - boxH / 2;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.28)";
+  ctx.shadowBlur = width * 0.018;
+  ctx.shadowOffsetY = width * 0.004;
+  roundedRectPath(ctx, boxX, boxY, boxW, boxH, width * 0.024);
+  ctx.fillStyle = "rgba(0,0,0,0.58)";
+  ctx.fill();
+  ctx.restore();
+
+  drawWrappedText(ctx, layout, width / 2, centerY, {
+    fill: captionFill(lc, "#FFFFFF"),
+    stroke: null,
+    shadow: false,
+    family: FONT_FAMILY_BODY,
+    align: "center",
+  });
 }
 
 // Centered headline text over a soft scrim, clamped inside the safe area.

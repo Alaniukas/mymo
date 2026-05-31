@@ -1,51 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import {
-  ArrowRight,
-  BookOpen,
-  Flame,
-  ImagePlus,
-  Link2,
-  Sparkles,
-} from "lucide-react";
+import { ArrowRight, Sparkles, Type, Video } from "lucide-react";
 
 const modes = [
   {
-    href: "/dashboard/stories/new?source=social",
-    title: "Social → Story",
-    badge: "Variant 1",
+    href: "/dashboard/founder-hooks/new",
+    title: "Founder Hook Reels",
+    badge: "Video",
     description:
-      "Paste IG / TikTok profile link. We scrape your last 5–20 posts, import the photos, and build a marketing carousel from your real content.",
-    icon: Link2,
+      "Upload your app demo clips. AI generates ultra-realistic UGC creator video hooks (you choose how many), stitched in front of your demo into one reel with minimalist storyline captions — A/B test what stops the scroll.",
+    icon: Video,
     accent: "bg-[#1a1a1a] text-white",
   },
   {
-    href: "/dashboard/stories/new?source=brand",
-    title: "Brand + Photos",
-    badge: "Variant 2",
-    description:
-      "Your brand brain + uploaded photos + optional notes. AI plans on-brand storytelling without needing a social link.",
-    icon: ImagePlus,
-    accent: "bg-white border-2 border-black text-black",
-  },
-  {
     href: "/dashboard/stories/carousel",
-    title: "Story Carousel",
-    badge: "Variant 3",
+    title: "Simple Text Carousel",
+    badge: "Text",
     description:
-      "Serial swipe stories for follower growth — text-only black/white slides or AI images that share one story line. Optional brand experience angle.",
-    icon: BookOpen,
+      "Clean black & white text slides, written by AI from your topic and brand. Typography carries the message from hook to CTA — pick your slide count and post.",
+    icon: Type,
     accent: "bg-white border-2 border-black text-black",
-  },
-  {
-    href: "/dashboard/viral/new",
-    title: "Brainrot Meme Pump",
-    badge: "Variant 4",
-    description:
-      "For founders who want volume. Pick a meme format — AI ships scroll-stopping hooks with your product on the back slide.",
-    icon: Flame,
-    accent: "bg-[var(--ember)] text-white",
   },
 ];
 
@@ -55,11 +30,11 @@ export default function CreateHubPage() {
       <div className="mb-10">
         <p className="text-sm font-medium text-[#666]">Create</p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">
-          Pick your engine
+          What are you making?
         </h1>
         <p className="mt-2 max-w-xl text-[#444]">
-          Four ways in — all powered by your brand brain. Same export pipeline,
-          different growth playbooks.
+          Two formats for app founders — a viral video hook reel or a clean text
+          carousel. Both powered by your brand brain.
         </p>
       </div>
 
@@ -91,22 +66,15 @@ export default function CreateHubPage() {
 
       <div className="mt-10 rounded-xl border border-dashed border-black/20 bg-white/60 p-4 text-sm text-[#555]">
         <Sparkles className="mb-2 h-4 w-4 text-[var(--ember)]" />
-        LinkedIn & Facebook profile scrape coming next — IG & TikTok work today
-        (needs <code className="text-xs">APIFY_TOKEN</code>).{" "}
+        Both formats are powered by your brand brain.{" "}
         <Link
           href="/dashboard/onboarding"
           className="font-semibold text-black underline"
         >
           Brand setup
         </Link>{" "}
-        improves all four modes.
+        makes them sharper.
       </div>
-
-      <p className="mt-6 text-center text-xs text-[#888]">
-        <Link href="/dashboard/carousels/new" className="underline hover:text-black">
-          Template studio (legacy)
-        </Link>
-      </p>
     </div>
   );
 }

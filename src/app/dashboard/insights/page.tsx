@@ -91,7 +91,7 @@ export default function InsightsPage() {
             will show up here.
           </p>
           <Link
-            href="/dashboard/carousels/new"
+            href="/dashboard/create"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[var(--ember)] text-white font-semibold border-2 border-black shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000]"
           >
             <Sparkles className="w-4 h-4" />

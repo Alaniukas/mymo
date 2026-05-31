@@ -1,5 +1,6 @@
-import { CommunityTemplatesClient } from "@/components/dashboard/community-templates-client";
+import { redirect } from "next/navigation";
 
-export default function CommunityTemplatesPage() {
-  return <CommunityTemplatesClient />;
+/** Legacy community templates — replaced by hook template library. */
+export default function CommunityTemplatesRedirect() {
+  redirect("/dashboard/templates");
 }

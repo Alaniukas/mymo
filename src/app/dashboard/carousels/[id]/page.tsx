@@ -269,12 +269,12 @@ export default function CarouselDetailPage() {
   }
 
   const isVideo = carousel.media_type === "video";
-  // The slideshow export stitches the completed slide IMAGES (text-free video
-  // images get the caption burned on server-side), so eligibility is based on
-  // the image phase regardless of media type.
-  const exportEligibleCount = slides.filter(
-    (s) => s.status === "completed" && s.image_url,
-  ).length;
+  // Video carousels export by concatenating the finished per-slide CLIPS into one
+  // reel, so eligibility counts completed clips. Image carousels stitch the
+  // completed slide IMAGES into a slideshow.
+  const exportEligibleCount = isVideo
+    ? slides.filter((s) => s.video_status === "completed" && s.video_url).length
+    : slides.filter((s) => s.status === "completed" && s.image_url).length;
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -364,6 +364,7 @@ export default function CarouselDetailPage() {
           <VideoExportPanel
             carouselId={carouselId}
             eligibleCount={exportEligibleCount}
+            mode={isVideo ? "clips" : "slideshow"}
           />
 
           <button

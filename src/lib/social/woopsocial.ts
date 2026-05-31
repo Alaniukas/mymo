@@ -374,3 +374,8 @@ export function createPost(body: CreatePostBody): Promise<WoopPost> {
     body: JSON.stringify(body),
   });
 }
+
+/** Cancels/removes a post (used to cancel a still-scheduled post). */
+export function deletePost(postId: string): Promise<unknown> {
+  return request(`/posts/${encodeURIComponent(postId)}`, { method: "DELETE" });
+}

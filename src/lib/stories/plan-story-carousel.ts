@@ -3,7 +3,10 @@ import {
   extractMessageText,
   getOpenAIClient,
 } from "@/lib/openai/client";
-import { buildFullBrandContext } from "@/lib/carousel/prompts";
+import {
+  buildFullBrandContext,
+  IMPERFECT_CAPTION_GUIDANCE,
+} from "@/lib/carousel/prompts";
 import type { BrandProfile } from "@/lib/carousel/variables";
 import type {
   StoryCarouselMediaMode,
@@ -175,6 +178,8 @@ export async function planStoryCarousel(opts: {
   slideCount: number;
   platform: string;
   model?: string;
+  /** Subtle typos + casual tone on slide copy and post caption. */
+  imperfect?: boolean;
 }): Promise<StoryCarouselPlan> {
   const count = Math.min(Math.max(Math.round(opts.slideCount) || 5, 3), 10);
   const brandContext = buildFullBrandContext(opts.brand);
@@ -182,15 +187,18 @@ export async function planStoryCarousel(opts: {
     ? `\n\nExtra context:\n${opts.context.trim().slice(0, 4000)}`
     : "";
 
-  const system =
+  const baseSystem =
     opts.mediaMode === "text_only" ? TEXT_ONLY_SYSTEM : WITH_IMAGES_SYSTEM;
+  const system = opts.imperfect
+    ? `${baseSystem}\n\n${IMPERFECT_CAPTION_GUIDANCE}`
+    : baseSystem;
 
   const openai = getOpenAIClient();
   const completion = await openai.chat.completions.create({
     ...EVOLINK_CHAT_DEFAULTS,
     model: opts.model || EVOLINK_CHAT_DEFAULTS.model,
     max_completion_tokens: 4096,
-    temperature: 0.82,
+    temperature: opts.imperfect ? 0.9 : 0.82,
     messages: [
       { role: "system", content: system },
       {

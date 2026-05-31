@@ -10,6 +10,7 @@ import {
   ExternalLink,
   CheckCircle2,
   Link2,
+  CalendarClock,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { CarouselPreview } from "@/components/dashboard/carousel-preview";
@@ -91,11 +92,14 @@ export function PublishModal({
   const [caption, setCaption] = useState("");
   const [captionLoading, setCaptionLoading] = useState(true);
   const [autoAddMusic, setAutoAddMusic] = useState(true);
+  const [scheduleMode, setScheduleMode] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     platform: string;
     url: string | null;
+    scheduledFor: string | null;
   } | null>(null);
 
   // Prefill with the same caption publishing would use by default.
@@ -127,6 +131,22 @@ export function PublishModal({
       return;
     }
 
+    let scheduledForIso: string | undefined;
+    if (scheduleMode) {
+      if (!scheduledAt) {
+        setError("Pick a date and time to schedule.");
+        return;
+      }
+      const when = new Date(scheduledAt);
+      if (Number.isNaN(when.getTime())) {
+        setError("Pick a valid date and time to schedule.");
+        return;
+      }
+      // The server enforces the "at least a minute in the future" rule and
+      // returns a clear error, so no clock read is needed here.
+      scheduledForIso = when.toISOString();
+    }
+
     setPublishing(true);
     setError(null);
 
@@ -139,6 +159,7 @@ export function PublishModal({
           social_connection_id: connection.id,
           auto_add_music: autoAddMusic,
           caption: caption.trim(),
+          ...(scheduledForIso ? { scheduled_for: scheduledForIso } : {}),
         }),
       });
 
@@ -149,7 +170,11 @@ export function PublishModal({
         return;
       }
 
-      setResult({ platform, url: data.post_url ?? null });
+      setResult({
+        platform,
+        url: data.post_url ?? null,
+        scheduledFor: data.scheduled_for ?? null,
+      });
       onPublished(platform);
     } catch {
       setError("Network error");
@@ -174,11 +199,13 @@ export function PublishModal({
         <div className="flex items-center justify-between px-5 py-4 border-b-2 border-black">
           <div>
             <h2 className="text-lg font-bold">
-              {result ? "Posted!" : "Post carousel"}
+              {result ? (result.scheduledFor ? "Scheduled!" : "Posted!") : "Post carousel"}
             </h2>
             <p className="text-xs text-[#666] mt-0.5">
               {result
-                ? "Your carousel is on its way."
+                ? result.scheduledFor
+                  ? "Your carousel is queued to publish automatically."
+                  : "Your carousel is on its way."
                 : "Review and publish to a connected account."}
             </p>
           </div>
@@ -196,13 +223,39 @@ export function PublishModal({
         <div className="p-5 space-y-4">
           {result ? (
             <div className="space-y-4 text-center py-2">
-              <CheckCircle2 className="w-12 h-12 mx-auto text-green-500" />
+              {result.scheduledFor ? (
+                <CalendarClock className="w-12 h-12 mx-auto text-[var(--ember)]" />
+              ) : (
+                <CheckCircle2 className="w-12 h-12 mx-auto text-green-500" />
+              )}
               <p className="text-sm text-[#444]">
-                Published to{" "}
-                <span className="font-semibold">
-                  {platformName(result.platform)}
-                </span>
-                .
+                {result.scheduledFor ? (
+                  <>
+                    Scheduled for{" "}
+                    <span className="font-semibold">
+                      {new Date(result.scheduledFor).toLocaleString(undefined, {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>{" "}
+                    on{" "}
+                    <span className="font-semibold">
+                      {platformName(result.platform)}
+                    </span>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Published to{" "}
+                    <span className="font-semibold">
+                      {platformName(result.platform)}
+                    </span>
+                    .
+                  </>
+                )}
               </p>
               {result.url && (
                 <a
@@ -353,6 +406,48 @@ export function PublishModal({
                       </button>
                     </div>
                   )}
+
+                  <div className="rounded-lg border-2 border-black bg-white px-3 py-2.5 shadow-[2px_2px_0_0_#000]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2">
+                        <CalendarClock className="w-4 h-4 mt-0.5 shrink-0 text-[var(--ember)]" />
+                        <div>
+                          <p className="text-xs font-semibold leading-tight">
+                            Schedule for later
+                          </p>
+                          <p className="text-[11px] text-[#666] leading-tight mt-0.5">
+                            Queue it to publish automatically at a set time.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={scheduleMode}
+                        aria-label="Schedule for later"
+                        onClick={() => setScheduleMode((v) => !v)}
+                        className={cn(
+                          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-black transition-colors",
+                          scheduleMode ? "bg-[var(--ember)]" : "bg-gray-200",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "inline-block h-3 w-3 rounded-full bg-white border border-black transition-transform",
+                            scheduleMode ? "translate-x-4" : "translate-x-0.5",
+                          )}
+                        />
+                      </button>
+                    </div>
+                    {scheduleMode && (
+                      <input
+                        type="datetime-local"
+                        value={scheduledAt}
+                        onChange={(e) => setScheduledAt(e.target.value)}
+                        className="mt-2.5 w-full rounded-lg border-2 border-black/15 px-3 py-2 text-sm focus:border-black focus:outline-none"
+                      />
+                    )}
+                  </div>
                 </>
               )}
 
@@ -372,12 +467,16 @@ export function PublishModal({
                 >
                   {publishing ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : scheduleMode ? (
+                    <CalendarClock className="w-4 h-4" />
                   ) : (
                     <Send className="w-4 h-4" />
                   )}
                   {publishing
-                    ? "Publishing…"
-                    : `Publish to ${platform ? platformName(platform) : "…"}`}
+                    ? scheduleMode
+                      ? "Scheduling…"
+                      : "Publishing…"
+                    : `${scheduleMode ? "Schedule for" : "Publish to"} ${platform ? platformName(platform) : "…"}`}
                 </button>
               )}
             </>

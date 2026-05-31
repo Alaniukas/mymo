@@ -31,14 +31,19 @@ export function ModelSettingsForm({
   const [textModel, setTextModel] = useState(initialSettings.text_model);
   const [imageModel, setImageModel] = useState(initialSettings.image_model);
   const [videoModel, setVideoModel] = useState(initialSettings.video_model ?? "");
+  const [hookVideoModel, setHookVideoModel] = useState(
+    initialSettings.hook_video_model ?? "",
+  );
   const [state, setState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const canSave = textModel.trim() !== "" && imageModel.trim() !== "";
 
   async function handleSave() {
     setState("saving");
     setError(null);
+    setWarning(null);
 
     try {
       const res = await fetch("/api/admin/settings", {
@@ -48,6 +53,7 @@ export function ModelSettingsForm({
           text_model: textModel.trim(),
           image_model: imageModel.trim(),
           video_model: videoModel.trim() || null,
+          hook_video_model: hookVideoModel.trim() || null,
         }),
       });
 
@@ -62,6 +68,10 @@ export function ModelSettingsForm({
         setTextModel(data.settings.text_model);
         setImageModel(data.settings.image_model);
         setVideoModel(data.settings.video_model ?? "");
+        setHookVideoModel(data.settings.hook_video_model ?? "");
+      }
+      if (typeof data.warning === "string" && data.warning.trim()) {
+        setWarning(data.warning.trim());
       }
       setState("saved");
     } catch {
@@ -116,8 +126,8 @@ export function ModelSettingsForm({
 
         <ModelField
           icon={Video}
-          label="Video model"
-          description="Animates carousel slide images into short clips (image-to-video). Falls back to the default when set to None."
+          label="Video model (carousels)"
+          description="Animates generic video carousel slides (image-to-video). Falls back to the default when set to None."
           options={VIDEO_MODEL_OPTIONS}
           value={videoModel}
           onChange={(v) => {
@@ -126,7 +136,29 @@ export function ModelSettingsForm({
           }}
           allowNone
         />
+
+        <div className="border-t-2 border-dashed border-gray-200" />
+
+        <ModelField
+          icon={Video}
+          label="Hook animation model"
+          description="Image-to-video model for Founder Hook Reels (silent reaction clips). Try Seedance 1.5 Pro or 2.0 for realistic faces. Falls back to Video model (carousels), then the platform default."
+          options={VIDEO_MODEL_OPTIONS}
+          value={hookVideoModel}
+          onChange={(v) => {
+            setHookVideoModel(v);
+            setState("idle");
+          }}
+          allowNone
+        />
       </div>
+
+      {warning && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{warning}</p>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">

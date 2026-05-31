@@ -14,8 +14,14 @@ import { cn } from "@/lib/utils";
 
 interface VideoExportPanelProps {
   carouselId: string;
-  /** Completed slide images available to stitch into the video. */
+  /** Completed slides/clips available to stitch into the video. */
   eligibleCount: number;
+  /**
+   * "clips" → concatenate finished per-slide video clips into one reel (their
+   * lengths are fixed, so no duration control). "slideshow" → still-image
+   * slideshow with an adjustable per-slide duration. Defaults to "slideshow".
+   */
+  mode?: "clips" | "slideshow";
 }
 
 interface MusicSummary {
@@ -29,7 +35,12 @@ const MAX_SECONDS = 60;
 const clampLength = (n: number) =>
   Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Math.round(n)));
 
-export function VideoExportPanel({ carouselId, eligibleCount }: VideoExportPanelProps) {
+export function VideoExportPanel({
+  carouselId,
+  eligibleCount,
+  mode = "slideshow",
+}: VideoExportPanelProps) {
+  const isClips = mode === "clips";
   const [music, setMusic] = useState<MusicSummary | null>(null);
   const [includeMusic, setIncludeMusic] = useState(false);
   const [totalLength, setTotalLength] = useState(() =>
@@ -102,14 +113,18 @@ export function VideoExportPanel({ carouselId, eligibleCount }: VideoExportPanel
         <div>
           <p className="text-sm font-semibold leading-tight">Export as video</p>
           <p className="text-[11px] text-[#666] leading-tight mt-0.5">
-            Combine the slides into one downloadable MP4.
+            {isClips
+              ? "Stitch the hook + your clips into one downloadable MP4."
+              : "Combine the slides into one downloadable MP4."}
           </p>
         </div>
       </div>
 
       {eligibleCount === 0 ? (
         <p className="mt-3 text-xs text-[#666]">
-          Generate slides first — then you can export them as a video.
+          {isClips
+            ? "Finish generating the reel — then you can export it as one video."
+            : "Generate slides first — then you can export them as a video."}
         </p>
       ) : (
         <div className="mt-4 space-y-4">
@@ -138,31 +153,38 @@ export function VideoExportPanel({ carouselId, eligibleCount }: VideoExportPanel
             </div>
           )}
 
-          <div>
-            <label
-              htmlFor="export-length"
-              className="flex items-center justify-between text-xs font-semibold"
-            >
-              <span>Video length</span>
-              <span className="text-[#666] font-normal">
-                {totalLength}s · ~{perSlide}s / slide
-              </span>
-            </label>
-            <input
-              id="export-length"
-              type="range"
-              min={MIN_SECONDS}
-              max={MAX_SECONDS}
-              value={totalLength}
-              onChange={(e) => setTotalLength(Number(e.target.value))}
-              disabled={rendering}
-              className="w-full mt-2 accent-[var(--ember)]"
-            />
-            <div className="flex justify-between text-[10px] text-[#999] mt-0.5">
-              <span>{MIN_SECONDS}s</span>
-              <span>{MAX_SECONDS}s</span>
+          {isClips ? (
+            <p className="text-[11px] text-[#666] leading-snug">
+              Plays your AI hook clip first, then each app clip in order — one
+              continuous reel at its natural length.
+            </p>
+          ) : (
+            <div>
+              <label
+                htmlFor="export-length"
+                className="flex items-center justify-between text-xs font-semibold"
+              >
+                <span>Video length</span>
+                <span className="text-[#666] font-normal">
+                  {totalLength}s · ~{perSlide}s / slide
+                </span>
+              </label>
+              <input
+                id="export-length"
+                type="range"
+                min={MIN_SECONDS}
+                max={MAX_SECONDS}
+                value={totalLength}
+                onChange={(e) => setTotalLength(Number(e.target.value))}
+                disabled={rendering}
+                className="w-full mt-2 accent-[var(--ember)]"
+              />
+              <div className="flex justify-between text-[10px] text-[#999] mt-0.5">
+                <span>{MIN_SECONDS}s</span>
+                <span>{MAX_SECONDS}s</span>
+              </div>
             </div>
-          </div>
+          )}
 
           {music && (
             <div className="flex items-start justify-between gap-3 rounded-lg border-2 border-black bg-white px-3 py-2.5 shadow-[2px_2px_0_0_#000]">

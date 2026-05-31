@@ -11,6 +11,8 @@ export interface ModelSettings {
   image_model: string;
   /** Image-to-video model that animates carousel slide images into clips. */
   video_model: string | null;
+  /** Image-to-video model for founder hook reel animation. Falls back to video_model. */
+  hook_video_model: string | null;
 }
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -20,6 +22,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   // at lower cost than Nano Banana Pro. Note: 2,000-char prompt limit — keep prompts tight.
   image_model: "gemini-3.1-flash-image-preview",
   video_model: "seedance-2.0-fast-image-to-video",
+  hook_video_model: "seedance-2.0-fast-image-to-video",
 };
 
 export interface ModelOption {
@@ -68,18 +71,84 @@ export const IMAGE_MODEL_OPTIONS: ModelOption[] = [
 ];
 
 // Image-to-video models reachable through EvoLink's async video API
-// (POST /v1/videos/generations). Video carousels animate each generated slide
-// IMAGE into a clip, so these must be image-to-video (not text-to-video) models.
+// (POST /v1/videos/generations). Keep in sync with VIDEO_MODELS in
+// lib/evolink/video-models.ts — used for carousel video + hook animation in /admin.
 export const VIDEO_MODEL_OPTIONS: ModelOption[] = [
+  {
+    slug: "seedance-1.5-pro",
+    label: "Seedance 1.5 Pro",
+    note: "1080p · native audio · strong for realistic UGC hooks",
+  },
   {
     slug: "seedance-2.0-fast-image-to-video",
     label: "Seedance 2.0 Fast",
-    note: "Default · fast image-to-video with synced audio",
+    note: "Default · fast · synced audio optional",
   },
-  { slug: "seedance-2.0-image-to-video", label: "Seedance 2.0" },
-  { slug: "kling-v3-image-to-video", label: "Kling V3 (image-to-video)" },
-  { slug: "kling-o3-image-to-video", label: "Kling O3 (image-to-video)" },
-  { slug: "wan2.7-image-to-video", label: "WAN 2.7 (image-to-video)" },
+  {
+    slug: "seedance-2.0-image-to-video",
+    label: "Seedance 2.0",
+    note: "Higher quality · 1080p · realistic humans",
+  },
+  {
+    slug: "doubao-seedance-1.0-pro-fast",
+    label: "Seedance 1.0 Pro Fast",
+    note: "Faster Seedance 1.x generation",
+  },
+  {
+    slug: "kling-o3-image-to-video",
+    label: "Kling O3",
+    note: "Omni model · up to 15s · sound via API sound param",
+  },
+  {
+    slug: "kling-v3-image-to-video",
+    label: "Kling V3",
+    note: "Reliable image-to-video · 5–10s",
+  },
+  {
+    slug: "kling-o1-image-to-video",
+    label: "Kling O1",
+    note: "Earlier Kling image-to-video",
+  },
+  {
+    slug: "wan2.6-image-to-video",
+    label: "WAN 2.6",
+    note: "First-frame · 2–15s · 1080p",
+  },
+  {
+    slug: "wan2.6-image-to-video-flash",
+    label: "WAN 2.6 Flash",
+    note: "Faster WAN 2.6 variant",
+  },
+  {
+    slug: "wan2.7-image-to-video",
+    label: "WAN 2.7",
+    note: "Image-to-video · 480p–1080p",
+  },
+  {
+    slug: "wan2.5-image-to-video",
+    label: "WAN 2.5",
+    note: "First-frame image-to-video",
+  },
+  {
+    slug: "veo-3.1-fast",
+    label: "Veo 3.1 Fast",
+    note: "Google · fast preview generation",
+  },
+  {
+    slug: "veo3.1-pro-beta",
+    label: "Veo 3.1 Pro",
+    note: "Google · higher quality",
+  },
+  {
+    slug: "veo-3.1-fast-generate-preview",
+    label: "Veo 3.1 Fast (Preview)",
+    note: "Preview endpoint slug",
+  },
+  {
+    slug: "grok-imagine-image-to-video-beta",
+    label: "Grok Imagine (beta)",
+    note: "xAI image-to-video beta",
+  },
 ];
 
 export const MODEL_OPTIONS: Record<ModelKind, ModelOption[]> = {
@@ -102,10 +171,22 @@ export function normalizeModelSettings(
   const text = typeof input?.text_model === "string" ? input.text_model.trim() : "";
   const image = typeof input?.image_model === "string" ? input.image_model.trim() : "";
   const video = typeof input?.video_model === "string" ? input.video_model.trim() : "";
+  const hookVideo =
+    typeof input?.hook_video_model === "string" ? input.hook_video_model.trim() : "";
 
   return {
     text_model: text || DEFAULT_MODEL_SETTINGS.text_model,
     image_model: image || DEFAULT_MODEL_SETTINGS.image_model,
     video_model: video || null,
+    hook_video_model: hookVideo || null,
   };
+}
+
+/** Resolved model slug for founder hook image-to-video animation. */
+export function resolveHookVideoModel(settings: ModelSettings): string {
+  return (
+    settings.hook_video_model?.trim() ||
+    settings.video_model?.trim() ||
+    DEFAULT_MODEL_SETTINGS.hook_video_model!
+  );
 }

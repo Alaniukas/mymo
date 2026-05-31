@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
         : "instagram";
     const slideCount =
       typeof body?.slide_count === "number" ? body.slide_count : 5;
+    const imperfect = Boolean(body?.imperfect);
 
     if (!topic && !context) {
       return NextResponse.json(
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
       context,
       slideCount,
       platform,
+      imperfect,
     });
 
     if ("error" in result && result.error) {

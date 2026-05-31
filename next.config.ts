@@ -36,6 +36,13 @@ const nextConfig: NextConfig = {
     // Publishing a video carousel concatenates its clips into one MP4 (ffmpeg)
     // before upload — captions are already on the clips, so no canvas/fonts.
     "/api/publish/*": ["./node_modules/ffmpeg-static/**"],
+    // The founder hook reels engine burns minimalist storyline captions onto the
+    // uploaded app clips at generation time (ffmpeg + canvas + fonts).
+    "/api/founder-hooks/generate": [
+      "./src/lib/carousel/fonts/**",
+      "./node_modules/ffmpeg-static/**",
+      "./node_modules/@napi-rs/canvas-*/**",
+    ],
   },
 };
 

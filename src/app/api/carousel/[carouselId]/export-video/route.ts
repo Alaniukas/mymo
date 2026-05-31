@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/rate-limit";
 import { fetchMediaBuffer } from "@/lib/carousel/storage";
-import { renderImageWithOverlay, overlayDimsForAspect } from "@/lib/carousel/overlay";
+import { overlayDimsForAspect } from "@/lib/carousel/overlay";
 import {
   renderSlideshow,
+  renderClipReel,
   perSlideSeconds,
   MIN_TOTAL_SECONDS,
   MAX_TOTAL_SECONDS,
 } from "@/lib/carousel/video-export";
 import { getSizeForPlatform } from "@/lib/carousel/prompts";
+import { getVideoAspectForPlatform } from "@/lib/carousel/video";
 import { logContentEvent } from "@/lib/analytics/events";
 
 // Downloading slide images, compositing captions (canvas) and encoding the MP4
@@ -46,12 +48,6 @@ interface SlideRow {
   caption: string | null;
   status: string;
   image_url: string | null;
-}
-
-function roleForPosition(position: number, total: number): string {
-  if (position <= 1) return "hook";
-  if (position >= total) return "cta";
-  return "value";
 }
 
 // Tolerant carousel read: media_type/music/export_* may be absent on a database
@@ -130,6 +126,27 @@ async function loadCompletedSlides(
   );
 }
 
+/**
+ * Video carousels store one finished clip per slide. Returns the completed
+ * clip URLs in play order (the AI hook clip first, then the founder's app-demo
+ * clips). Captions are already burned onto each clip during generation.
+ */
+async function loadCompletedClips(
+  supabase: DB,
+  carouselId: string,
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("carousel_slides")
+    .select("video_url, video_status, position")
+    .eq("carousel_id", carouselId)
+    .eq("video_status", "completed")
+    .order("position", { ascending: true });
+
+  return ((data ?? []) as { video_url: string | null }[])
+    .map((s) => s.video_url)
+    .filter((url): url is string => !!url);
+}
+
 async function resolveWorkspace(
   supabase: DB,
   carousel: CarouselRow,
@@ -185,12 +202,15 @@ export async function GET(
     const workspace = await resolveWorkspace(supabase, carousel, user.id);
     if (!workspace) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
-    const slides = await loadCompletedSlides(supabase, carouselId);
+    const eligible =
+      carousel.media_type === "video"
+        ? (await loadCompletedClips(supabase, carouselId)).length
+        : (await loadCompletedSlides(supabase, carouselId)).length;
 
     return NextResponse.json({
       platform: carousel.platform,
       media_type: carousel.media_type,
-      eligible_slides: slides.length,
+      eligible_slides: eligible,
       music: carousel.music?.playUrl
         ? { title: carousel.music.title, author: carousel.music.author, available: true }
         : null,
@@ -236,80 +256,115 @@ export async function POST(
       include_music?: boolean;
     };
 
-    const slides = await loadCompletedSlides(supabase, carouselId);
-    if (slides.length === 0) {
-      return NextResponse.json(
-        { error: "No completed slides to export yet." },
-        { status: 400 },
-      );
-    }
-
-    const totalLength = Math.min(
-      MAX_TOTAL_SECONDS,
-      Math.max(
-        MIN_TOTAL_SECONDS,
-        Math.round(body.total_length_seconds ?? slides.length * 3),
-      ),
-    );
-    const secondsPerFrame = perSlideSeconds(totalLength, slides.length);
     const isVideoCarousel = carousel.media_type === "video";
 
-    await persistExport(supabase, carouselId, { export_status: "rendering" });
-
-    // Build the ordered frames. Image carousels already have their caption baked
-    // into image_url; video-carousel images are text-free, so burn the caption
-    // on here so the exported slideshow shows the same text as the clips.
-    const frames: Buffer[] = [];
-    for (const slide of slides) {
-      if (!slide.image_url) continue;
-      const dl = await fetchMediaBuffer(slide.image_url);
-      if (!dl) continue;
-
-      const caption = slide.caption?.trim();
-      if (isVideoCarousel && caption) {
-        try {
-          frames.push(
-            await renderImageWithOverlay(
-              dl.buffer,
-              caption,
-              roleForPosition(slide.position, slides.length),
-              { aspect: getSizeForPlatform(carousel.platform) },
-            ),
-          );
-          continue;
-        } catch (err) {
-          console.warn(`[export-video] overlay slide ${slide.id} failed:`, err);
-        }
-      }
-      frames.push(dl.buffer);
-    }
-
-    if (frames.length === 0) {
-      await persistExport(supabase, carouselId, {
-        export_status: "failed",
-        export_error: "Could not download any slide images.",
-      });
-      return NextResponse.json(
-        { error: "Could not download any slide images." },
-        { status: 502 },
-      );
-    }
-
+    // Optional trending-sound track, laid over the whole video (shared by both
+    // the clip-reel and slideshow paths).
     let audio: Buffer | null = null;
-    const includeMusic = Boolean(body.include_music) && Boolean(carousel.music?.playUrl);
+    const includeMusic =
+      Boolean(body.include_music) && Boolean(carousel.music?.playUrl);
     if (includeMusic && carousel.music?.playUrl) {
       const dl = await fetchMediaBuffer(carousel.music.playUrl);
       audio = dl?.buffer ?? null;
     }
 
-    const { width, height } = overlayDimsForAspect(getSizeForPlatform(carousel.platform));
-    const videoBuffer = await renderSlideshow({
-      frames,
-      secondsPerFrame,
-      width,
-      height,
-      audio,
-    });
+    let videoBuffer: Buffer;
+    let options: Record<string, unknown>;
+
+    if (isVideoCarousel) {
+      // Video carousel → stitch the finished per-slide CLIPS into one continuous
+      // reel (the AI hook clip first, then the founder's app-demo clips). Each
+      // clip already carries its burned-in caption, so nothing is overlaid here.
+      const clipUrls = await loadCompletedClips(supabase, carouselId);
+      if (clipUrls.length === 0) {
+        return NextResponse.json(
+          { error: "No finished video clips to export yet." },
+          { status: 400 },
+        );
+      }
+
+      await persistExport(supabase, carouselId, { export_status: "rendering" });
+
+      const clips: Buffer[] = [];
+      for (const url of clipUrls) {
+        const dl = await fetchMediaBuffer(url);
+        if (dl) clips.push(dl.buffer);
+      }
+      if (clips.length === 0) {
+        await persistExport(supabase, carouselId, {
+          export_status: "failed",
+          export_error: "Could not download the video clips to combine.",
+        });
+        return NextResponse.json(
+          { error: "Could not download the video clips to combine." },
+          { status: 502 },
+        );
+      }
+
+      const aspect = getVideoAspectForPlatform(carousel.platform);
+      const { width, height } = overlayDimsForAspect(aspect);
+      videoBuffer = await renderClipReel({ clips, width, height, audio });
+      options = {
+        mode: "clips",
+        clip_count: clips.length,
+        include_music: Boolean(audio),
+      };
+    } else {
+      // Image carousel → still-image slideshow (captions are already baked into
+      // each slide image), each frame held for an even share of the length.
+      const slides = await loadCompletedSlides(supabase, carouselId);
+      if (slides.length === 0) {
+        return NextResponse.json(
+          { error: "No completed slides to export yet." },
+          { status: 400 },
+        );
+      }
+
+      const totalLength = Math.min(
+        MAX_TOTAL_SECONDS,
+        Math.max(
+          MIN_TOTAL_SECONDS,
+          Math.round(body.total_length_seconds ?? slides.length * 3),
+        ),
+      );
+      const secondsPerFrame = perSlideSeconds(totalLength, slides.length);
+
+      await persistExport(supabase, carouselId, { export_status: "rendering" });
+
+      const frames: Buffer[] = [];
+      for (const slide of slides) {
+        if (!slide.image_url) continue;
+        const dl = await fetchMediaBuffer(slide.image_url);
+        if (dl) frames.push(dl.buffer);
+      }
+
+      if (frames.length === 0) {
+        await persistExport(supabase, carouselId, {
+          export_status: "failed",
+          export_error: "Could not download any slide images.",
+        });
+        return NextResponse.json(
+          { error: "Could not download any slide images." },
+          { status: 502 },
+        );
+      }
+
+      const { width, height } = overlayDimsForAspect(
+        getSizeForPlatform(carousel.platform),
+      );
+      videoBuffer = await renderSlideshow({
+        frames,
+        secondsPerFrame,
+        width,
+        height,
+        audio,
+      });
+      options = {
+        total_length_seconds: totalLength,
+        per_slide_seconds: secondsPerFrame,
+        include_music: Boolean(audio),
+      };
+    }
 
     const storagePath = `${workspace.id}/${carouselId}/export.mp4`;
     const { error: uploadError } = await supabase.storage
@@ -334,12 +389,6 @@ export async function POST(
       .from("carousels")
       .getPublicUrl(storagePath);
 
-    const options = {
-      total_length_seconds: totalLength,
-      per_slide_seconds: secondsPerFrame,
-      include_music: Boolean(audio),
-    };
-
     await persistExport(supabase, carouselId, {
       export_status: "ready",
       export_video_url: publicUrl.publicUrl,
@@ -361,7 +410,6 @@ export async function POST(
       status: "ready",
       url: publicUrl.publicUrl,
       options,
-      frames: frames.length,
     });
   } catch (error) {
     console.error("[export-video] POST error:", error);

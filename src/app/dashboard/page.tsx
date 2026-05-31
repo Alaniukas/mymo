@@ -31,9 +31,9 @@ async function getProjectStats(workspaceId: string) {
       .select("id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId),
     supabase
-      .from("carousel_templates")
+      .from("hook_templates")
       .select("id", { count: "exact", head: true })
-      .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`),
+      .eq("published", true),
     supabase
       .from("carousels")
       .select("id", { count: "exact", head: true })
@@ -82,15 +82,15 @@ export default async function DashboardPage() {
       done: brandSetupDone,
     },
     {
-      label: "Add a Template",
-      description: "Import or upload a carousel style to replicate",
+      label: "Browse hook templates",
+      description: "Viral hook openers to stitch in front of your app demo",
       href: "/dashboard/templates",
       icon: LayoutTemplate,
       done: stats.templateCount > 0,
     },
     {
       label: "Create content",
-      description: "Brand story, viral memes, or classic template carousel",
+      description: "Founder hook reels or simple text carousels",
       href: "/dashboard/create",
       icon: Layers,
       done: stats.carouselCount > 0,

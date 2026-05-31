@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 const MAX_FILES_PER_BATCH = 20;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES_IMAGE = 10 * 1024 * 1024;
+const MAX_FILE_BYTES_VIDEO = 50 * 1024 * 1024;
 const UPLOAD_CONCURRENCY = 3;
 
 interface StagedItem {
@@ -18,6 +19,8 @@ interface AssetUploadProps {
   workspaceId: string;
   /** Asset bucket. Defaults to "hook" — the app now treats assets as one pool. */
   type?: "hook" | "demo";
+  /** Media kind to accept. Defaults to "image"; "video" enables app demo clips. */
+  media?: "image" | "video";
   onUploadComplete: () => void;
   /** Compact layout for embedded pickers (e.g. Create wizard). */
   compact?: boolean;
@@ -84,9 +87,15 @@ async function runWithConcurrency<T>(
 export function AssetUpload({
   workspaceId,
   type = "hook",
+  media = "image",
   onUploadComplete,
   compact = false,
 }: AssetUploadProps) {
+  const isVideo = media === "video";
+  const acceptAttr = isVideo ? "video/*" : "image/*";
+  const noun = isVideo ? "video" : "image";
+  const nounPlural = isVideo ? "videos" : "images";
+
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -104,57 +113,67 @@ export function AssetUpload({
     return () => itemsRef.current.forEach((it) => URL.revokeObjectURL(it.url));
   }, []);
 
-  const addFiles = useCallback((list: FileList | File[]) => {
-    const incoming = Array.from(list);
-    const nonImages = incoming.filter((f) => !f.type.startsWith("image/"));
-    const images = incoming.filter((f) => f.type.startsWith("image/"));
+  const addFiles = useCallback(
+    (list: FileList | File[]) => {
+      const isVid = media === "video";
+      const prefix = isVid ? "video/" : "image/";
+      const maxBytes = isVid ? MAX_FILE_BYTES_VIDEO : MAX_FILE_BYTES_IMAGE;
+      const maxMb = Math.round(maxBytes / (1024 * 1024));
+      const plural = isVid ? "videos" : "images";
+      const single = isVid ? "video" : "image";
 
-    if (images.length === 0) {
-      setError("Only image files are supported.");
-      return;
-    }
+      const incoming = Array.from(list);
+      const wrongType = incoming.filter((f) => !f.type.startsWith(prefix));
+      const matching = incoming.filter((f) => f.type.startsWith(prefix));
 
-    const tooLarge = images.filter((f) => f.size > MAX_FILE_BYTES);
-    const valid = images.filter((f) => f.size <= MAX_FILE_BYTES);
-
-    const messages: string[] = [];
-    if (nonImages.length > 0) {
-      messages.push(
-        `${nonImages.length} file${nonImages.length === 1 ? "" : "s"} skipped (not images).`,
-      );
-    }
-    if (tooLarge.length > 0) {
-      messages.push(
-        `${tooLarge.length} file${tooLarge.length === 1 ? "" : "s"} skipped (max 10 MB each).`,
-      );
-    }
-
-    setItems((prev) => {
-      const room = MAX_FILES_PER_BATCH - prev.length;
-      if (room <= 0) {
-        setError(`You can stage up to ${MAX_FILES_PER_BATCH} images at a time.`);
-        return prev;
+      if (matching.length === 0) {
+        setError(`Only ${plural} are supported.`);
+        return;
       }
-      const toAdd = valid.slice(0, room);
-      if (valid.length > room) {
+
+      const tooLarge = matching.filter((f) => f.size > maxBytes);
+      const valid = matching.filter((f) => f.size <= maxBytes);
+
+      const messages: string[] = [];
+      if (wrongType.length > 0) {
         messages.push(
-          `Only ${room} more image${room === 1 ? "" : "s"} added (batch limit ${MAX_FILES_PER_BATCH}).`,
+          `${wrongType.length} file${wrongType.length === 1 ? "" : "s"} skipped (not ${plural}).`,
         );
       }
-      if (toAdd.length === 0) return prev;
-      return [
-        ...prev,
-        ...toAdd.map((file) => ({
-          file,
-          url: URL.createObjectURL(file),
-        })),
-      ];
-    });
+      if (tooLarge.length > 0) {
+        messages.push(
+          `${tooLarge.length} file${tooLarge.length === 1 ? "" : "s"} skipped (max ${maxMb} MB each).`,
+        );
+      }
 
-    if (messages.length > 0) setNotice(messages.join(" "));
-    else setNotice(null);
-    if (valid.length > 0) setError(null);
-  }, []);
+      setItems((prev) => {
+        const room = MAX_FILES_PER_BATCH - prev.length;
+        if (room <= 0) {
+          setError(`You can stage up to ${MAX_FILES_PER_BATCH} ${plural} at a time.`);
+          return prev;
+        }
+        const toAdd = valid.slice(0, room);
+        if (valid.length > room) {
+          messages.push(
+            `Only ${room} more ${single}${room === 1 ? "" : "s"} added (batch limit ${MAX_FILES_PER_BATCH}).`,
+          );
+        }
+        if (toAdd.length === 0) return prev;
+        return [
+          ...prev,
+          ...toAdd.map((file) => ({
+            file,
+            url: URL.createObjectURL(file),
+          })),
+        ];
+      });
+
+      if (messages.length > 0) setNotice(messages.join(" "));
+      else setNotice(null);
+      if (valid.length > 0) setError(null);
+    },
+    [media],
+  );
 
   function removeItem(index: number) {
     setItems((prev) => {
@@ -239,7 +258,7 @@ export function AssetUpload({
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept={acceptAttr}
           multiple
           className="hidden"
           onChange={(e) => {
@@ -256,7 +275,7 @@ export function AssetUpload({
         ) : (
           <div className="space-y-2">
             <Upload className={cn("mx-auto text-[#999]", compact ? "w-6 h-6" : "w-8 h-8")} />
-            <p className="text-sm font-medium">Drop images here</p>
+            <p className="text-sm font-medium">Drop {nounPlural} here</p>
             <p className="text-xs text-[#999]">
               or click to browse — review below, then confirm upload
             </p>
@@ -291,12 +310,22 @@ export function AssetUpload({
                 key={it.url}
                 className="relative aspect-square rounded-lg overflow-hidden border-2 border-black"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={it.url}
-                  alt={it.file.name}
-                  className="w-full h-full object-cover"
-                />
+                {isVideo ? (
+                  <video
+                    src={it.url}
+                    className="w-full h-full object-cover"
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={it.url}
+                    alt={it.file.name}
+                    className="w-full h-full object-cover"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -317,7 +346,7 @@ export function AssetUpload({
             className="w-full px-5 py-2.5 rounded-lg bg-[var(--ember)] hover:bg-[var(--ember-hover)] text-white text-sm font-semibold border-2 border-black shadow-[3px_3px_0_0_#000] transition-[transform,box-shadow] duration-200 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#000] flex items-center justify-center gap-2"
           >
             <Upload className="w-4 h-4" />
-            Upload {items.length} image{items.length === 1 ? "" : "s"}
+            Upload {items.length} {items.length === 1 ? noun : nounPlural}
           </button>
         </div>
       )}

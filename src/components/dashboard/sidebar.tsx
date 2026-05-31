@@ -11,11 +11,11 @@ import {
   Plus,
   PanelLeftClose,
   PanelLeftOpen,
-  Users,
   BookOpen,
   BarChart3,
-  Flame,
-  Sparkles,
+  CalendarClock,
+  Type,
+  Video,
 } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "@/components/logo";
@@ -27,15 +27,15 @@ import { cn } from "@/lib/utils";
 const mainNav = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/onboarding", label: "Brand setup", icon: Palette },
-  { href: "/dashboard/templates", label: "Templates", icon: LayoutTemplate },
-  { href: "/dashboard/community-templates", label: "Community", icon: Users },
+  { href: "/dashboard/templates", label: "Hook templates", icon: LayoutTemplate },
 ];
 
 const outputNav = [
   { href: "/dashboard/carousels", label: "Carousels", icon: Layers },
-  { href: "/dashboard/stories/new?source=social", label: "Social → story", icon: Sparkles },
-  { href: "/dashboard/viral/new", label: "Meme pump", icon: Flame },
+  { href: "/dashboard/stories/carousel", label: "Simple carousel", icon: Type },
+  { href: "/dashboard/founder-hooks/new", label: "Hook reels", icon: Video },
   { href: "/dashboard/library", label: "Library", icon: BookOpen },
+  { href: "/dashboard/schedule", label: "Schedule", icon: CalendarClock },
   { href: "/dashboard/insights", label: "Insights", icon: BarChart3 },
   { href: "/dashboard/connections", label: "Connections", icon: Link2 },
 ];
